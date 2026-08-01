@@ -38,6 +38,56 @@ function nextId(prefix, records){
   return `${prefix}-${year}-${String(max+1).padStart(4,"0")}`;
 }
 
+async function personApi(payload, method="POST"){
+  const response = await fetch(
+    method === "GET" ? `/api/person-register?${new URLSearchParams(payload)}` : "/api/person-register",
+    method === "GET"
+      ? { cache: "no-store" }
+      : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
+  );
+  const result = await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(result.error || "Personregister-Aktion fehlgeschlagen.");
+  return result;
+}
+
+async function syncPersonLink(kind, record){
+  if(!record?.personId) return;
+  return personApi({
+    action:"link_record",
+    personId:record.personId,
+    department:"RCSO",
+    recordType:kind==="bolos"?"BOLO":kind.toUpperCase(),
+    recordId:record.id,
+    recordStatus:record.status||null,
+    summary:record.reason||record.title||record.offense||record.subject||null,
+    occurredAt:record.createdAt||record.updatedAt||new Date().toISOString(),
+    metadata:{ boloType:record.boloType||null, officer:record.officer||null },
+    purpose:"RCSO record synchronization"
+  });
+}
+
+async function unlinkPersonRecord(kind, record){
+  if(!record?.personId) return;
+  return personApi({
+    action:"unlink_record",
+    personId:record.personId,
+    department:"RCSO",
+    recordType:kind==="bolos"?"BOLO":kind.toUpperCase(),
+    recordId:record.id,
+    purpose:"RCSO record deletion or reassignment"
+  });
+}
+
+
+function pdfEscape(value){return String(value??"").replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)")}
+function wrapPdf(lines,max=92){const out=[];for(const raw of lines){let line=String(raw??"");if(!line){out.push("");continue}while(line.length>max){let cut=line.lastIndexOf(" ",max);if(cut<20)cut=max;out.push(line.slice(0,cut));line=line.slice(cut).trimStart()}out.push(line)}return out}
+function downloadPersonPdf(person){
+  const lines=wrapPdf([`PERSON PROFILE — ${person.public_id}`,"Riverside County Shared Person Register","",`Legal name: ${[person.legal_first_name,person.legal_middle_name,person.legal_last_name,person.suffix].filter(Boolean).join(" ")}`,`Status: ${person.status}`,`DOB: ${person.date_of_birth||"—"}`,`Sex: ${person.sex||"—"}`,`SSN: ${person.ssn_masked||"—"}`,`Driver License: ${person.driver_license_masked||"—"}`,"","ADDRESSES",...(person.addresses||[]).map(a=>`- ${a.line1}, ${a.city}, ${a.state_code} ${a.postal_code||""}${a.is_current?" (current)":""}`),"","ROLES",...(person.roles||[]).map(r=>`- ${r.organization} — ${r.title_or_rank||r.role_type}${r.badge_number?` — Badge ${r.badge_number}`:""}`),"","DEPARTMENT LINKS",...(person.links||[]).map(l=>`- ${l.department} / ${l.record_type} / ${l.record_id} / ${l.record_status||"—"} / ${l.summary||"—"}`),"","EVENTS",...(person.events||[]).map(e=>`- ${e.event_category}: ${e.title} / ${e.event_status||"—"} / ${e.department} / ${e.summary||"—"}`),"",`Exported: ${new Date().toISOString()}`]);
+  const pages=[];for(let i=0;i<lines.length;i+=48)pages.push(lines.slice(i,i+48));const objects=[null],add=v=>(objects.push(v),objects.length-1),font=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),pageIds=[],contentIds=[];
+  for(const page of pages){const cmds=["BT","/F1 10 Tf","42 760 Td","12 TL"];page.forEach((line,i)=>{if(i)cmds.push("T*");cmds.push(`(${pdfEscape(line)}) Tj`)});cmds.push("ET");const stream=cmds.join("\n");contentIds.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));pageIds.push(add(""))}
+  const pagesId=add("");pageIds.forEach((id,i)=>objects[id]=`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${contentIds[i]} 0 R >>`);objects[pagesId]=`<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map(id=>`${id} 0 R`).join(" ")}] >>`;const catalog=add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);let pdf="%PDF-1.4\n",offsets=[0];for(let i=1;i<objects.length;i++){offsets[i]=pdf.length;pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`}const xref=pdf.length;pdf+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;for(let i=1;i<objects.length;i++)pdf+=`${String(offsets[i]).padStart(10,"0")} 00000 n \n`;pdf+=`trailer\n<< /Size ${objects.length} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF`;const blob=new Blob([pdf],{type:"application/pdf"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`${person.public_id}-person-profile.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)
+}
+
 export default function Portal(){
   const [employee,setEmployee]=useState(null);
   const [state,setState]=useState({bolos:[],files:[],arrests:[],complaints:[],notices:[]});
@@ -75,9 +125,28 @@ export default function Portal(){
     if(!r.ok){setMessage(p.error||"Speichern fehlgeschlagen.");return false}
     setState(next);setVersion(Number(p.version));setMessage("Änderung gespeichert.");setTimeout(()=>setMessage(""),2200);return true;
   }
-  function addRecord(kind,record){save({...state,[kind]:[...state[kind],record]},`${kind.toUpperCase()}_CREATED`,{id:record.id})}
-  function updateRecord(kind,id,changes){save({...state,[kind]:state[kind].map(x=>x.id===id?{...x,...changes,updatedAt:nowIso()}:x)},`${kind.toUpperCase()}_UPDATED`,{id,changes})}
-  function removeRecord(kind,id){if(!confirm("Datensatz wirklich löschen?"))return;save({...state,[kind]:state[kind].filter(x=>x.id!==id)},`${kind.toUpperCase()}_DELETED`,{id});setSelected(null)}
+  async function addRecord(kind,record){
+    const ok=await save({...state,[kind]:[...state[kind],record]},`${kind.toUpperCase()}_CREATED`,{id:record.id});
+    if(ok&&record.personId){try{await syncPersonLink(kind,record)}catch(error){setMessage(`Datensatz gespeichert; Personregister-Synchronisierung fehlgeschlagen: ${error.message}`)}}
+  }
+  async function updateRecord(kind,id,changes){
+    const previous=state[kind].find(x=>x.id===id);
+    const updated={...previous,...changes,updatedAt:nowIso()};
+    const ok=await save({...state,[kind]:state[kind].map(x=>x.id===id?updated:x)},`${kind.toUpperCase()}_UPDATED`,{id,changes});
+    if(!ok)return;
+    try{
+      if(previous?.personId&&previous.personId!==updated.personId)await unlinkPersonRecord(kind,previous);
+      if(updated.personId)await syncPersonLink(kind,updated);
+    }catch(error){setMessage(`Datensatz gespeichert; Personregister-Synchronisierung fehlgeschlagen: ${error.message}`)}
+  }
+  async function removeRecord(kind,id){
+    const record=state[kind].find(x=>x.id===id);
+    if(!record||!confirm("Datensatz wirklich löschen?"))return;
+    const ok=await save({...state,[kind]:state[kind].filter(x=>x.id!==id)},`${kind.toUpperCase()}_DELETED`,{id});
+    if(!ok)return;
+    try{await unlinkPersonRecord(kind,record)}catch(error){setMessage(`Datensatz gelöscht; alter Personregister-Verweis konnte nicht entfernt werden: ${error.message}`)}
+    setSelected(null);
+  }
   const filtered=useMemo(()=>{
     const q=search.trim().toLowerCase();if(!q)return null;const result=[];
     for(const [kind,records] of Object.entries({bolos:state.bolos,files:state.files,arrests:state.arrests,complaints:state.complaints}))
@@ -185,14 +254,7 @@ function PersonPicker({name,label}){
 
 function RecordModule({employee,title,kind,records,selected,setSelected,addRecord,updateRecord,removeRecord,prefix,fields}){
   const current=records.find(x=>x.id===selected), mayCreate=can(employee,"create",kind), mayEdit=can(employee,"edit",kind), mayDelete=can(employee,"delete",kind);
-  function submit(e){e.preventDefault();const f=new FormData(e.currentTarget);const record={id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName};for(const [key] of fields)record[key]=f.get(key);record.notes=f.get("notes");addRecord(kind,record);
-    if(record.personId){
-      fetch("/api/person-register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-        action:"link_record",personId:record.personId,department:"RCSO",recordType:kind==="bolos"?"BOLO":kind,
-        recordId:record.id,recordStatus:record.status||null,summary:record.reason||record.title||record.offense||null,
-        occurredAt:record.createdAt,purpose:"Sheriff record association"
-      })}).catch(console.error);
-    }
+  async function submit(e){e.preventDefault();const f=new FormData(e.currentTarget);const record={id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName};for(const [key] of fields)record[key]=f.get(key);record.notes=f.get("notes");await addRecord(kind,record);
     e.currentTarget.reset()}
   return <div className="record-layout">
     <section className="panel list-panel"><div className="panel-header">{title.toUpperCase()}</div>
@@ -202,6 +264,43 @@ function RecordModule({employee,title,kind,records,selected,setSelected,addRecor
       {fields.map(([k,l])=><p key={k}><strong>{l}:</strong> {current[k]||"—"}</p>)}<p><strong>Erstellt:</strong> {fmt(current.createdAt)}</p><p><strong>Erstellt durch:</strong> {current.createdBy||"—"}</p><p><strong>Notizen:</strong><br/>{current.notes||"—"}</p>
       <div className="detail-actions">{mayEdit&&<button onClick={()=>{const changes={};for(const [k,l] of fields){const v=prompt(l,current[k]||"");if(v===null)return;changes[k]=v}updateRecord(kind,current.id,changes)}}>Bearbeiten</button>}{mayDelete&&<button className="danger" onClick={()=>removeRecord(kind,current.id)}>Löschen</button>}</div></div>}</section>
   </div>
+}
+
+
+function openIdentityEditor(person, action){
+  const legalFirstName=prompt("Vorname:",person.legal_first_name||"");if(legalFirstName===null)return;
+  const legalMiddleName=prompt("Zweiter Vorname:",person.legal_middle_name||"");if(legalMiddleName===null)return;
+  const legalLastName=prompt("Nachname:",person.legal_last_name||"");if(legalLastName===null)return;
+  const dateOfBirth=prompt("Geburtsdatum (YYYY-MM-DD):",person.date_of_birth||"");if(dateOfBirth===null)return;
+  const sex=prompt("Geschlecht:",person.sex||"");if(sex===null)return;
+  const primaryPhone=prompt("Telefon:",person.primary_phone||"");if(primaryPhone===null)return;
+  const primaryEmail=prompt("E-Mail:",person.primary_email||"");if(primaryEmail===null)return;
+  const purpose=prompt("Korrekturgrund / Quelle:");if(!purpose)return;
+  action({action:"update_person",personId:person.public_id,legalFirstName,legalMiddleName,legalLastName,dateOfBirth,sex,primaryPhone,primaryEmail,generalNotes:person.general_notes||"",purpose});
+}
+function openAddressEditor(person, action){
+  const line1=prompt("Straße und Hausnummer:");if(!line1)return;
+  const city=prompt("Stadt:");if(!city)return;
+  const stateCode=prompt("Bundesstaat:","CA")||"CA";
+  const postalCode=prompt("ZIP Code:")||"";
+  const source=prompt("Quelle / Begründung:");if(!source)return;
+  action({action:"add_address",personId:person.public_id,line1,city,stateCode,postalCode,addressType:"residential",isCurrent:true,verified:false,source});
+}
+function openRoleEditor(person, action){
+  const roleType=prompt("Rollentyp (law_enforcement, government_employee, elected_official, appointed_official, military, other):","law_enforcement");if(!roleType)return;
+  const organization=prompt("Organisation / Department:");if(!organization)return;
+  const titleOrRank=prompt("Titel / Rang:")||"";
+  const badgeNumber=prompt("Badge Number (optional):")||"";
+  const employeeNumber=prompt("Employee Number (optional):")||"";
+  const jurisdiction=prompt("Jurisdiction:","Riverside County")||"";
+  const source=prompt("Quelle:");if(!source)return;
+  action({action:"add_role",personId:person.public_id,roleType,organization,titleOrRank,badgeNumber,employeeNumber,jurisdiction,status:"active",source});
+}
+function openRelationshipEditor(person, action){
+  const relatedPersonId=prompt("Person-ID der verbundenen Person:");if(!relatedPersonId)return;
+  const relationshipType=prompt("Beziehung (spouse, parent, child, sibling, household member, business associate …):");if(!relationshipType)return;
+  const source=prompt("Quelle:");if(!source)return;
+  action({action:"add_relationship",personId:person.public_id,relatedPersonId:relatedPersonId.trim().toUpperCase(),relationshipType,verified:false,confidence:"reported",source});
 }
 
 function Admin({employee}){
@@ -282,10 +381,16 @@ function PersonRegister({employee}){
           <tbody>{person.links?.map(l=><tr key={l.id}><td>{l.department}</td><td>{l.record_type}</td><td>{l.record_id}</td><td>{l.record_status||"—"}</td><td>{l.summary||"—"}</td><td>{l.amount==null?"—":`$${Number(l.amount).toFixed(2)}`}</td></tr>)}</tbody></table></section>
         <section><h3>Law-Enforcement / Custody History</h3>{person.events?.map(ev=><article className="person-event" key={ev.id}><strong>{ev.event_category}: {ev.title}</strong><span>{ev.event_status||""} • {ev.occurred_at?fmt(ev.occurred_at):"Unknown date"} • {ev.department}</span><p>{ev.summary||"—"}</p></article>)}</section>
         <section><h3>Relationships</h3>{person.relationships?.map(r=><p key={r.id}>{r.relationship_type}: {r.related_first_name} {r.related_last_name} ({r.related_person_id})</p>)}</section>
-        <div className="person-profile-actions"><label>Mugshot / Foto hinzufügen<input type="file" accept="image/*" onChange={uploadPhoto}/></label>
+        <div className="person-profile-actions">
+          <label>Mugshot / Foto hinzufügen<input type="file" accept="image/*" onChange={uploadPhoto}/></label>
+          <button onClick={()=>openIdentityEditor(person,action)}>Stammdaten bearbeiten</button>
+          <button onClick={()=>openAddressEditor(person,action)}>Adresse hinzufügen</button>
+          <button onClick={()=>openRoleEditor(person,action)}>LEO / Behördenrolle hinzufügen</button>
+          <button onClick={()=>openRelationshipEditor(person,action)}>Beziehung hinzufügen</button>
           <button onClick={()=>{const last=prompt("Alias-Nachname");if(last)action({action:"add_alias",personId:person.public_id,lastName:last,source:"RCSO profile update"})}}>Alias hinzufügen</button>
-          <button onClick={()=>{const title=prompt("Ereignisbezeichnung");if(title)action({action:"add_event",personId:person.public_id,eventCategory:"other",title,department:"RCSO",summary:prompt("Zusammenfassung")||""})}}>Ereignis hinzufügen</button>
-          <button onClick={()=>window.print()}>Personenprofil exportieren / drucken</button></div>
+          <button onClick={()=>{const title=prompt("Ereignisbezeichnung");if(title)action({action:"add_event",personId:person.public_id,eventCategory:"other",title,summary:prompt("Zusammenfassung")||""})}}>Ereignis hinzufügen</button>
+          <button onClick={()=>downloadPersonPdf(person)}>Personenprofil als PDF herunterladen</button>
+        </div>
       </div>}
     </section>
   </div>

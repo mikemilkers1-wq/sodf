@@ -76,6 +76,280 @@ async function loadPerson(sql, id) {
   };
 }
 
+
+function personLegalName(person) {
+  return [person.legal_first_name, person.legal_middle_name, person.legal_last_name, person.suffix]
+    .filter(Boolean).join(" ");
+}
+
+function formattedAddress(address) {
+  return [
+    address.line1,
+    address.line2,
+    [address.city, address.state_code, address.postal_code].filter(Boolean).join(" ")
+  ].filter(Boolean).join(", ");
+}
+
+async function updateRincenState(sql, mutate) {
+  const rows = await sql`SELECT state, version FROM rcdf_portal_state WHERE id = 1`;
+  if (!rows.length) return false;
+
+  const current = rows[0];
+  const state = current.state;
+  const changed = await mutate(state);
+  if (!changed) return false;
+
+  const result = await sql`
+    UPDATE rcdf_portal_state
+    SET state = ${JSON.stringify(state)}::jsonb,
+        version = version + 1,
+        updated_at = NOW(),
+        updated_by = NULL
+    WHERE id = 1 AND version = ${Number(current.version)}
+    RETURNING version
+  `;
+  return Boolean(result.length);
+}
+
+async function synchronizePersonIntoRincen(sql, personId) {
+  const people = await sql`SELECT * FROM county_people WHERE public_id = ${personId}`;
+  if (!people.length) return false;
+
+  const person = people[0];
+  const addresses = await sql`
+    SELECT * FROM county_person_addresses
+    WHERE person_id = ${personId}
+    ORDER BY is_current DESC, created_at DESC
+  `;
+
+  return updateRincenState(sql, async state => {
+    let changed = false;
+    for (const account of state.accounts || []) {
+      if (account.personId !== personId) continue;
+
+      if (account.classification === "Privatperson") {
+        const legalName = personLegalName(person);
+        if (legalName && account.holder !== legalName) {
+          account.holder = legalName;
+          changed = true;
+        }
+      }
+
+      account.properties ||= [];
+      const addressIds = new Set(addresses.map(address => String(address.id)));
+
+      const filtered = account.properties.filter(property =>
+        property.source !== "person_register" ||
+        property.personAddressId == null ||
+        addressIds.has(String(property.personAddressId))
+      );
+      if (filtered.length !== account.properties.length) {
+        account.properties = filtered;
+        changed = true;
+      }
+
+      for (const address of addresses) {
+        const propertyId = `person-address-${address.id}`;
+        const name = formattedAddress(address);
+        const existing = account.properties.find(property => property.id === propertyId);
+        const next = {
+          id: propertyId,
+          type: address.is_current ? "Aktuelle Adresse" : "Frühere Adresse",
+          name,
+          value: 0,
+          reference: `PERSONREGISTER:${address.id}`,
+          note: `${address.address_type || "address"} • ${address.verified ? "verified" : "unverified"}`,
+          createdAt: address.created_at,
+          createdBy: "County Person Register",
+          source: "person_register",
+          personAddressId: address.id,
+          addressData: {
+            line1: address.line1,
+            line2: address.line2,
+            city: address.city,
+            stateCode: address.state_code,
+            postalCode: address.postal_code,
+            isCurrent: address.is_current
+          }
+        };
+        if (!existing) {
+          account.properties.push(next);
+          changed = true;
+        } else if (JSON.stringify(existing) !== JSON.stringify(next)) {
+          Object.assign(existing, next);
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  });
+}
+
+async function removePersonFromRincen(sql, personId) {
+  return updateRincenState(sql, async state => {
+    let changed = false;
+    for (const account of state.accounts || []) {
+      if (account.personId !== personId) continue;
+      account.personId = null;
+      account.properties = (account.properties || []).filter(property => property.source !== "person_register");
+      changed = true;
+    }
+    return changed;
+  });
+}
+
+async function synchronizeRincenAccountLinks(sql, accountId, employee) {
+  const rows = await sql`SELECT state FROM rcdf_portal_state WHERE id = 1`;
+  if (!rows.length) throw new Error("RinCEN state not found.");
+
+  const state = rows[0].state;
+  const account = (state.accounts || []).find(item => item.id === accountId);
+  if (!account) throw new Error("RinCEN account not found.");
+  if (!account.personId) throw new Error("Account is not linked to a person.");
+
+  const personId = account.personId;
+  const now = new Date().toISOString();
+
+  await sql`
+    DELETE FROM county_person_links
+    WHERE department = 'RINCEN'
+      AND metadata->>'accountId' = ${accountId}
+      AND record_type IN ('PROPERTY','LICENSE','INVOICE','ENFORCEMENT','INVESTIGATION')
+  `;
+
+  await sql`
+    INSERT INTO county_person_links
+      (person_id, department, record_type, record_id, record_status,
+       summary, amount, occurred_at, metadata)
+    VALUES (
+      ${personId}, 'RINCEN', 'ACCOUNT', ${account.id}, ${account.status || null},
+      ${`${account.holder} • ${account.classification}`},
+      ${Number(account.balance || 0)}, ${now},
+      ${JSON.stringify({ accountId, risk: account.risk })}::jsonb
+    )
+    ON CONFLICT (department, record_type, record_id)
+    DO UPDATE SET person_id = EXCLUDED.person_id,
+      record_status = EXCLUDED.record_status,
+      summary = EXCLUDED.summary,
+      amount = EXCLUDED.amount,
+      metadata = EXCLUDED.metadata,
+      updated_at = NOW()
+  `;
+
+  for (const property of account.properties || []) {
+    if (property.source === "person_register") continue;
+    await sql`
+      INSERT INTO county_person_links
+        (person_id, department, record_type, record_id, record_status,
+         summary, amount, occurred_at, metadata)
+      VALUES (
+        ${personId}, 'RINCEN', 'PROPERTY', ${`${account.id}:${property.id}`}, 'recorded',
+        ${`${property.type}: ${property.name}`}, ${Number(property.value || 0)},
+        ${property.createdAt || now},
+        ${JSON.stringify({
+          accountId,
+          propertyId: property.id,
+          reference: property.reference || null,
+          note: property.note || null
+        })}::jsonb
+      )
+      ON CONFLICT (department, record_type, record_id)
+      DO UPDATE SET person_id = EXCLUDED.person_id, summary = EXCLUDED.summary,
+        amount = EXCLUDED.amount, metadata = EXCLUDED.metadata, updated_at = NOW()
+    `;
+  }
+
+  for (const license of account.licenses || []) {
+    await sql`
+      INSERT INTO county_person_links
+        (person_id, department, record_type, record_id, record_status,
+         summary, occurred_at, metadata)
+      VALUES (
+        ${personId}, 'RINCEN', 'LICENSE', ${license.number || `${account.id}:${license.id}`},
+        ${license.status || "active"},
+        ${`${license.type} • ${license.scope || "No scope recorded"}`},
+        ${license.createdAt || now},
+        ${JSON.stringify({
+          accountId,
+          licenseId: license.id,
+          expiresAt: license.expiresAt || null,
+          neverExpires: Boolean(license.neverExpires),
+          reference: license.reference || null
+        })}::jsonb
+      )
+      ON CONFLICT (department, record_type, record_id)
+      DO UPDATE SET person_id = EXCLUDED.person_id, record_status = EXCLUDED.record_status,
+        summary = EXCLUDED.summary, metadata = EXCLUDED.metadata, updated_at = NOW()
+    `;
+  }
+
+  for (const invoice of (state.invoices || []).filter(item => item.accountId === account.id)) {
+    await sql`
+      INSERT INTO county_person_links
+        (person_id, department, record_type, record_id, record_status,
+         summary, amount, occurred_at, metadata)
+      VALUES (
+        ${personId}, 'RINCEN', 'INVOICE', ${invoice.id}, ${invoice.status || null},
+        ${invoice.subject || "Invoice"}, ${Number(invoice.total || 0)},
+        ${invoice.issuedAt || now},
+        ${JSON.stringify({ accountId, dueDate: invoice.dueDate || null })}::jsonb
+      )
+      ON CONFLICT (department, record_type, record_id)
+      DO UPDATE SET person_id = EXCLUDED.person_id, record_status = EXCLUDED.record_status,
+        summary = EXCLUDED.summary, amount = EXCLUDED.amount,
+        metadata = EXCLUDED.metadata, updated_at = NOW()
+    `;
+  }
+
+  for (const order of (state.enforcementOrders || []).filter(item => item.accountId === account.id)) {
+    await sql`
+      INSERT INTO county_person_links
+        (person_id, department, record_type, record_id, record_status,
+         summary, amount, occurred_at, metadata)
+      VALUES (
+        ${personId}, 'RINCEN', 'ENFORCEMENT', ${order.id}, ${order.status || null},
+        ${order.subject || order.type || "Enforcement matter"},
+        ${Number(order.amount || 0)}, ${order.createdAt || now},
+        ${JSON.stringify({
+          accountId,
+          recoveredAmount: Number(order.recoveredAmount || 0),
+          assignedTo: order.assignedTo || null
+        })}::jsonb
+      )
+      ON CONFLICT (department, record_type, record_id)
+      DO UPDATE SET person_id = EXCLUDED.person_id, record_status = EXCLUDED.record_status,
+        summary = EXCLUDED.summary, amount = EXCLUDED.amount,
+        metadata = EXCLUDED.metadata, updated_at = NOW()
+    `;
+  }
+
+  for (const investigation of (state.cases || []).filter(item => (item.accountIds || []).includes(account.id))) {
+    await sql`
+      INSERT INTO county_person_links
+        (person_id, department, record_type, record_id, record_status,
+         summary, occurred_at, metadata)
+      VALUES (
+        ${personId}, 'RINCEN', 'INVESTIGATION', ${investigation.id}, ${investigation.status || null},
+        ${investigation.title || investigation.subject || "Investigation"},
+        ${investigation.opened || now},
+        ${JSON.stringify({
+          accountId,
+          priority: investigation.priority || null,
+          assigned: investigation.assigned || null
+        })}::jsonb
+      )
+      ON CONFLICT (department, record_type, record_id)
+      DO UPDATE SET person_id = EXCLUDED.person_id, record_status = EXCLUDED.record_status,
+        summary = EXCLUDED.summary, metadata = EXCLUDED.metadata, updated_at = NOW()
+    `;
+  }
+
+  await log(sql, personId, employee, "RINCEN_ACCOUNT_SYNCHRONIZED",
+    "Automatic cross-department synchronization", { accountId });
+
+  return loadPerson(sql, personId);
+}
+
 export async function GET(request) {
   try {
     await ensureDatabase();
@@ -197,6 +471,63 @@ export async function POST(request) {
     const personId = String(body.personId || "").trim();
     if (!personId) return NextResponse.json({ error: "Person-ID fehlt." }, { status: 400 });
 
+    if (action === "sync_rincen_account") {
+      if (DEPARTMENT !== "RINCEN") {
+        return NextResponse.json({ error: "Diese Synchronisierung ist nur über RinCEN verfügbar." }, { status: 403 });
+      }
+      const person = await synchronizeRincenAccountLinks(sql, String(body.accountId || ""), employee);
+      return NextResponse.json({ person });
+    }
+
+    if (action === "delete_person") {
+      if (employee.role !== "sheriff_admin") {
+        return NextResponse.json({ error: "Nur ein Sheriff Administrator darf einen vollständigen Personeneintrag löschen." }, { status: 403 });
+      }
+      if (String(body.confirmPersonId || "").trim().toUpperCase() !== personId.toUpperCase()) {
+        return NextResponse.json({ error: "Die Bestätigungs-ID stimmt nicht mit der Person-ID überein." }, { status: 400 });
+      }
+      const existing = await sql`
+        SELECT public_id, legal_first_name, legal_middle_name, legal_last_name,
+               source_department, source_record, status
+        FROM county_people WHERE public_id = ${personId}
+      `;
+      if (!existing.length) return NextResponse.json({ error: "Person nicht gefunden." }, { status: 404 });
+
+      const user = actor(employee);
+      await sql`
+        INSERT INTO county_person_audit
+          (person_id, department, employee_key, action, purpose, details)
+        VALUES (
+          ${personId}, ${DEPARTMENT}, ${user.key}, 'PERSON_DELETION_AUTHORIZED',
+          ${body.reason || "Erroneous or test record removal"},
+          ${JSON.stringify({ deletedPerson: existing[0], requestedBy: user.name })}::jsonb
+        )
+      `;
+
+      await removePersonFromRincen(sql, personId);
+      await sql`DELETE FROM county_people WHERE public_id = ${personId}`;
+
+      await sql`
+        INSERT INTO county_person_audit
+          (person_id, department, employee_key, action, purpose, details)
+        VALUES (
+          NULL, ${DEPARTMENT}, ${user.key}, 'PERSON_DELETED',
+          ${body.reason || "Erroneous or test record removal"},
+          ${JSON.stringify({
+            deletedPersonId: personId,
+            deletedName: [
+              existing[0].legal_first_name,
+              existing[0].legal_middle_name,
+              existing[0].legal_last_name
+            ].filter(Boolean).join(" "),
+            sourceDepartment: existing[0].source_department,
+            sourceRecord: existing[0].source_record
+          })}::jsonb
+        )
+      `;
+      return NextResponse.json({ deleted: true, personId });
+    }
+
     if (action === "update_person") {
       await sql`
         UPDATE county_people SET
@@ -218,6 +549,7 @@ export async function POST(request) {
       `;
       await log(sql, personId, employee, "PERSON_IDENTITY_UPDATED",
         body.purpose || "Identity correction", {});
+      await synchronizePersonIntoRincen(sql, personId);
     } else if (action === "set_status") {
       if (!["active","archived","deceased","restricted"].includes(body.status)) {
         return NextResponse.json({ error: "Ungültiger Status." }, { status: 400 });
@@ -257,6 +589,7 @@ export async function POST(request) {
                 ${Boolean(body.verified)}, ${body.validFrom || null}, ${body.source || null})
       `;
       await log(sql, personId, employee, "PERSON_ADDRESS_ADDED", body.source || null, {});
+      await synchronizePersonIntoRincen(sql, personId);
     } else if (action === "add_photo") {
       const data = String(body.imageDataUrl || "");
       if (!data.startsWith("data:image/") || data.length > 2_800_000) {
