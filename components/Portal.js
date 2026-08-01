@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 
 const roleLabels = {
@@ -10,488 +9,188 @@ const roleLabels = {
   read_only: "Nur Lesen"
 };
 
-function nowIso() {
-  return new Date().toISOString();
+const roleDescriptions = {
+  sheriff_admin: "Vollständiger operativer Zugriff und Mitarbeiterverwaltung nach zusätzlicher Admin-Freigabe.",
+  supervisor: "Darf alle operativen Datensätze anlegen, bearbeiten und löschen.",
+  deputy: "Darf BOLOs, Akten, Festnahmen und Strafanzeigen anlegen und bearbeiten.",
+  dispatcher: "Darf BOLOs anlegen und aktualisieren; andere Module sind nur lesbar.",
+  read_only: "Kann Datensätze ausschließlich ansehen."
+};
+
+const permissions = {
+  sheriff_admin: new Set(["create","edit","delete","admin"]),
+  supervisor: new Set(["create","edit","delete"]),
+  deputy: new Set(["create","edit"]),
+  dispatcher: new Set(["bolo_create","bolo_edit"]),
+  read_only: new Set()
+};
+
+function can(employee, action, kind) {
+  const p = permissions[employee?.role] || new Set();
+  return p.has(action) || (kind === "bolos" && p.has(`bolo_${action}`));
+}
+function nowIso(){return new Date().toISOString()}
+function fmt(v){return v?new Intl.DateTimeFormat("de-DE",{dateStyle:"short",timeStyle:"short"}).format(new Date(v)):"—"}
+function nextId(prefix, records){
+  const year=new Date().getFullYear(); let max=0;
+  const rx=new RegExp(`^${prefix}-${year}-(\\d+)$`,"i");
+  for(const r of records){const m=String(r.id||"").match(rx);if(m)max=Math.max(max,Number(m[1])||0)}
+  return `${prefix}-${year}-${String(max+1).padStart(4,"0")}`;
 }
 
-function fmt(value) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "short",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
+export default function Portal(){
+  const [employee,setEmployee]=useState(null);
+  const [state,setState]=useState({bolos:[],files:[],arrests:[],complaints:[],notices:[]});
+  const [version,setVersion]=useState(null);
+  const [tab,setTab]=useState("home");
+  const [selected,setSelected]=useState(null);
+  const [message,setMessage]=useState("");
+  const [search,setSearch]=useState("");
 
-function nextId(prefix, records) {
-  const year = new Date().getFullYear();
-  let max = 0;
-  const rx = new RegExp(`^${prefix}-${year}-(\\d+)$`, "i");
-  for (const record of records) {
-    const match = String(record.id || "").match(rx);
-    if (match) max = Math.max(max, Number(match[1]) || 0);
+  useEffect(()=>{bootstrap()},[]);
+  useEffect(()=>{if(!employee)return;const t=setInterval(()=>refreshState(false),8000);return()=>clearInterval(t)},[employee,version]);
+
+  async function bootstrap(){
+    const r=await fetch("/api/auth/session",{cache:"no-store"});if(!r.ok)return;
+    const p=await r.json();setEmployee(p.employee);await refreshState(true);
   }
-  return `${prefix}-${year}-${String(max + 1).padStart(4, "0")}`;
-}
-
-export default function Portal() {
-  const [employee, setEmployee] = useState(null);
-  const [state, setState] = useState({
-    bolos: [],
-    files: [],
-    arrests: [],
-    complaints: [],
-    notices: []
-  });
-  const [version, setVersion] = useState(null);
-  const [tab, setTab] = useState("home");
-  const [selected, setSelected] = useState(null);
-  const [message, setMessage] = useState("");
-  const [employees, setEmployees] = useState([]);
-  const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    bootstrap();
-  }, []);
-
-  useEffect(() => {
-    if (!employee) return;
-    const timer = setInterval(() => refreshState(false), 8000);
-    return () => clearInterval(timer);
-  }, [employee, version]);
-
-  async function bootstrap() {
-    const response = await fetch("/api/auth/session", { cache: "no-store" });
-    if (!response.ok) return;
-    const payload = await response.json();
-    setEmployee(payload.employee);
-    await refreshState(true);
+  async function refreshState(force=false){
+    const r=await fetch("/api/state",{cache:"no-store"});if(!r.ok)return;
+    const p=await r.json();if(force||version===null||Number(p.version)>Number(version)){setState(p.state);setVersion(Number(p.version))}
   }
-
-  async function refreshState(force = false) {
-    const response = await fetch("/api/state", { cache: "no-store" });
-    if (!response.ok) return;
-    const payload = await response.json();
-    if (force || version === null || Number(payload.version) > Number(version)) {
-      setState(payload.state);
-      setVersion(Number(payload.version));
-    }
+  async function login(e){
+    e.preventDefault();setMessage("Anmeldung wird geprüft …");const f=new FormData(e.currentTarget);
+    const r=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employeeKey:f.get("employeeKey"),validationCode:f.get("validationCode")})});
+    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Anmeldung fehlgeschlagen.");
+    setEmployee(p.employee);setMessage("");await refreshState(true);
   }
-
-  async function login(event) {
-    event.preventDefault();
-    setMessage("Anmeldung wird geprüft …");
-    const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        employeeKey: form.get("employeeKey"),
-        validationCode: form.get("validationCode")
-      })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setMessage(payload.error || "Anmeldung fehlgeschlagen.");
-      return;
-    }
-    setEmployee(payload.employee);
-    setMessage("");
-    await refreshState(true);
+  async function logout(){
+    await fetch("/api/admin/lock",{method:"POST"});await fetch("/api/auth/logout",{method:"POST"});
+    setEmployee(null);setVersion(null);setTab("home");
   }
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    setEmployee(null);
-    setVersion(null);
-    setTab("home");
+  async function save(next,action,details={}){
+    const r=await fetch("/api/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({state:next,version,action,details})});
+    const p=await r.json().catch(()=>({}));
+    if(r.status===409){setMessage("Ein anderer Mitarbeiter hat den Datenbestand verändert. Neueste Version wird geladen.");await refreshState(true);return false}
+    if(!r.ok){setMessage(p.error||"Speichern fehlgeschlagen.");return false}
+    setState(next);setVersion(Number(p.version));setMessage("Änderung gespeichert.");setTimeout(()=>setMessage(""),2200);return true;
   }
+  function addRecord(kind,record){save({...state,[kind]:[...state[kind],record]},`${kind.toUpperCase()}_CREATED`,{id:record.id})}
+  function updateRecord(kind,id,changes){save({...state,[kind]:state[kind].map(x=>x.id===id?{...x,...changes,updatedAt:nowIso()}:x)},`${kind.toUpperCase()}_UPDATED`,{id,changes})}
+  function removeRecord(kind,id){if(!confirm("Datensatz wirklich löschen?"))return;save({...state,[kind]:state[kind].filter(x=>x.id!==id)},`${kind.toUpperCase()}_DELETED`,{id});setSelected(null)}
+  const filtered=useMemo(()=>{
+    const q=search.trim().toLowerCase();if(!q)return null;const result=[];
+    for(const [kind,records] of Object.entries({bolos:state.bolos,files:state.files,arrests:state.arrests,complaints:state.complaints}))
+      for(const item of records)if(JSON.stringify(item).toLowerCase().includes(q))result.push({kind,item});
+    return result;
+  },[search,state]);
 
-  async function save(nextState, action, details = {}) {
-    const response = await fetch("/api/state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        state: nextState,
-        version,
-        action,
-        details
-      })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (response.status === 409) {
-      setMessage("Ein anderer Mitarbeiter hat den Datenbestand verändert. Die neueste Version wird geladen.");
-      await refreshState(true);
-      return false;
-    }
-    if (!response.ok) {
-      setMessage(payload.error || "Speichern fehlgeschlagen.");
-      return false;
-    }
-    setState(nextState);
-    setVersion(Number(payload.version));
-    setMessage("Änderung gespeichert.");
-    setTimeout(() => setMessage(""), 2500);
-    return true;
-  }
+  if(!employee)return <main className="login-screen">
+    <img className="login-badge" src="/rcso-logo.png" alt="Riverside County Sheriff badge"/>
+    <h1>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</h1><p className="subtitle">LAW ENFORCEMENT RECORDS TERMINAL</p>
+    <form className="login-panel" onSubmit={login}>
+      <div className="panel-header">AUTORISIERTER ZUGANG</div>
+      <label>Mitarbeiterkennung<input name="employeeKey" placeholder="z. B. Walker 2041" required/></label>
+      <label>Validierungscode<input name="validationCode" type="password" required/></label>
+      <button type="submit">Zugang prüfen</button><div className="message">{message}</div>
+    </form>
+  </main>;
 
-  function addRecord(kind, record) {
-    const collection = [...state[kind], record];
-    const next = { ...state, [kind]: collection };
-    save(next, `${kind.toUpperCase()}_CREATED`, { id: record.id });
-  }
+  const tabs=[["home","⌂","Homepage"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
 
-  function updateRecord(kind, id, changes) {
-    const collection = state[kind].map(item => item.id === id ? { ...item, ...changes, updatedAt: nowIso() } : item);
-    const next = { ...state, [kind]: collection };
-    save(next, `${kind.toUpperCase()}_UPDATED`, { id, changes });
-  }
-
-  function removeRecord(kind, id) {
-    if (!confirm("Datensatz wirklich löschen?")) return;
-    const next = { ...state, [kind]: state[kind].filter(item => item.id !== id) };
-    save(next, `${kind.toUpperCase()}_DELETED`, { id });
-    setSelected(null);
-  }
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return null;
-    const results = [];
-    for (const [kind, records] of Object.entries({
-      bolos: state.bolos,
-      files: state.files,
-      arrests: state.arrests,
-      complaints: state.complaints
-    })) {
-      for (const item of records) {
-        const text = JSON.stringify(item).toLowerCase();
-        if (text.includes(q)) results.push({ kind, item });
-      }
-    }
-    return results;
-  }, [search, state]);
-
-  if (!employee) {
-    return (
-      <main className="login-screen">
-        <div className="seal">RCSO</div>
-        <h1>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</h1>
-        <p className="subtitle">LAW ENFORCEMENT RECORDS TERMINAL</p>
-        <form className="login-panel" onSubmit={login}>
-          <div className="panel-header">AUTORISIERTER ZUGANG</div>
-          <label>Mitarbeiterkennung<input name="employeeKey" placeholder="z. B. Walker 2041" required /></label>
-          <label>Validierungscode<input name="validationCode" type="password" required /></label>
-          <button type="submit">Zugang prüfen</button>
-          <div className="message">{message}</div>
-        </form>
-      </main>
-    );
-  }
-
-  return (
-    <main className="terminal">
-      <header className="terminal-header">
-        <div>
-          <strong>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</strong>
-          <small>INTERNAL RECORDS TERMINAL</small>
-        </div>
-        <div className="user-box">
-          {employee.displayName} · {roleLabels[employee.role] || employee.role}
-          <button onClick={logout}>Abmelden</button>
-        </div>
-      </header>
-
-      <nav className="tabs">
-        {[
-          ["home","⌂","Homepage"],
-          ["employees","▦","Mitarbeiterliste"],
-          ["bolos","⚑","BOLOs"],
-          ["files","▤","Akten"],
-          ["arrests","▣","Festnahmen"],
-          ["complaints","▧","Strafanzeigen"],
-          ["admin","⚙","Admin-Menü"]
-        ].map(([id,symbol,label]) => (
-          <button key={id} className={tab === id ? "active" : ""} onClick={() => { setTab(id); setSelected(null); }}>
-            <span>{symbol}</span>{label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="system-strip">
-        <span>RCSO-NET</span>
-        <span>Datenversion {version ?? "—"}</span>
-        <label className="global-search">⌕ <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Terminal durchsuchen" /></label>
-        <span className="ready">● SYSTEM READY</span>
-      </div>
-
-      {message && <div className="status-message">{message}</div>}
-
-      <section className="workspace">
-        {search.trim() && (
-          <div className="search-results">
-            <div className="panel-header">SUCHERGEBNISSE</div>
-            {(filtered || []).map(({ kind, item }) => (
-              <button key={`${kind}-${item.id}`} onClick={() => { setTab(kind); setSelected(item.id); setSearch(""); }}>
-                <strong>{item.id}</strong><span>{item.subject || item.person || item.title || item.name || "Datensatz"}</span>
-              </button>
-            ))}
-            {filtered && filtered.length === 0 && <p>Keine Treffer.</p>}
-          </div>
-        )}
-
-        {!search.trim() && tab === "home" && <Home state={state} employee={employee} setTab={setTab} />}
-        {!search.trim() && tab === "employees" && <EmployeeDirectory />}
-        {!search.trim() && tab === "bolos" && <RecordModule
-          title="BOLOs"
-          kind="bolos"
-          records={state.bolos}
-          selected={selected}
-          setSelected={setSelected}
-          addRecord={addRecord}
-          updateRecord={updateRecord}
-          removeRecord={removeRecord}
-          prefix="RCSO-BOLO"
-          fields={[
-            ["person","Gesuchte Person / Fahrzeug"],
-            ["reason","Grund / Gefahrenhinweis"],
-            ["status","Status"],
-            ["officer","Ausstellender Beamter"]
-          ]}
-        />}
-        {!search.trim() && tab === "files" && <RecordModule
-          title="Akten"
-          kind="files"
-          records={state.files}
-          selected={selected}
-          setSelected={setSelected}
-          addRecord={addRecord}
-          updateRecord={updateRecord}
-          removeRecord={removeRecord}
-          prefix="RCSO-FILE"
-          fields={[
-            ["title","Aktenbezeichnung"],
-            ["subject","Betroffene Person / Organisation"],
-            ["classification","Klassifikation"],
-            ["status","Status"]
-          ]}
-        />}
-        {!search.trim() && tab === "arrests" && <RecordModule
-          title="Festnahmen"
-          kind="arrests"
-          records={state.arrests}
-          selected={selected}
-          setSelected={setSelected}
-          addRecord={addRecord}
-          updateRecord={updateRecord}
-          removeRecord={removeRecord}
-          prefix="RCSO-ARR"
-          fields={[
-            ["person","Festgenommene Person"],
-            ["reason","Festnahmegrund"],
-            ["location","Ort"],
-            ["officer","Festnehmender Beamter"]
-          ]}
-        />}
-        {!search.trim() && tab === "complaints" && <RecordModule
-          title="Strafanzeigen"
-          kind="complaints"
-          records={state.complaints}
-          selected={selected}
-          setSelected={setSelected}
-          addRecord={addRecord}
-          updateRecord={updateRecord}
-          removeRecord={removeRecord}
-          prefix="RCSO-CR"
-          fields={[
-            ["person","Beschuldigte Person"],
-            ["offense","Tatvorwurf"],
-            ["complainant","Anzeigenerstatter"],
-            ["status","Verfahrensstatus"]
-          ]}
-        />}
-        {!search.trim() && tab === "admin" && <Admin employee={employee} employees={employees} setEmployees={setEmployees} />}
-      </section>
-    </main>
-  );
-}
-
-function Home({ state, employee, setTab }) {
-  const cards = [
-    ["Aktive BOLOs", state.bolos.filter(x => x.status !== "Closed").length, "bolos"],
-    ["Offene Akten", state.files.filter(x => x.status !== "Closed").length, "files"],
-    ["Festnahmen", state.arrests.length, "arrests"],
-    ["Strafanzeigen", state.complaints.length, "complaints"]
-  ];
-  return (
-    <div className="home-grid">
-      <section className="welcome-panel">
-        <div className="panel-header">RCSO TERMINAL</div>
-        <h2>Willkommen, {employee.displayName}</h2>
-        <p>Dieses Terminal dient der internen Bearbeitung von Fahndungen, Akten, Festnahmen und Strafanzeigen des Riverside County Sheriff&apos;s Office.</p>
-        <p>Jede Änderung wird serverseitig gespeichert und im Prüfprotokoll erfasst.</p>
-      </section>
-      <div className="stats-grid">
-        {cards.map(([label,count,target]) => <button key={label} onClick={() => setTab(target)}><strong>{count}</strong><span>{label}</span></button>)}
-      </div>
-    </div>
-  );
-}
-
-function EmployeeDirectory() {
-  const [employees, setEmployees] = useState([]);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    fetch("/api/admin/employees", { cache: "no-store" })
-      .then(async r => {
-        const p = await r.json();
-        if (!r.ok) throw new Error(p.error);
-        setEmployees(p.employees);
-      })
-      .catch(e => setError(e.message));
-  }, []);
-
-  return (
-    <section className="panel">
-      <div className="panel-header">MITARBEITERLISTE</div>
-      {error ? <p>{error}</p> : (
-        <table><thead><tr><th>Kennung</th><th>Name</th><th>Rolle</th><th>Status</th><th>Letzte Anmeldung</th></tr></thead>
-        <tbody>{employees.map(e => <tr key={e.id}><td>{e.employee_key}</td><td>{e.display_name}</td><td>{roleLabels[e.role]}</td><td>{e.status}</td><td>{fmt(e.last_login_at)}</td></tr>)}</tbody></table>
-      )}
+  return <main className="terminal">
+    <header className="terminal-header"><div className="brand"><img src="/rcso-logo.png" alt=""/><div><strong>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</strong><small>INTERNAL RECORDS TERMINAL</small></div></div>
+      <div className="user-box"><span>{employee.displayName} · {roleLabels[employee.role]}</span><button onClick={logout}>Abmelden</button></div></header>
+    <nav className="tabs">{tabs.map(([id,symbol,label])=><button key={id} className={tab===id?"active":""} onClick={()=>{setTab(id);setSelected(null)}}><span>{symbol}</span>{label}</button>)}</nav>
+    <div className="system-strip"><span>RCSO-NET</span><span>Datenversion {version??"—"}</span><label className="global-search">⌕ <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Terminal durchsuchen"/></label><span className="ready">● SYSTEM READY</span></div>
+    {message&&<div className="status-message">{message}</div>}
+    <section className="workspace">
+      {search.trim()?<SearchResults filtered={filtered} setTab={setTab} setSelected={setSelected} setSearch={setSearch}/>:<>
+        {tab==="home"&&<Home state={state} employee={employee} setTab={setTab}/>}
+        {tab==="employees"&&<EmployeeDirectory employee={employee}/>}
+        {tab==="bolos"&&<RecordModule employee={employee} title="BOLOs" kind="bolos" records={state.bolos} selected={selected} setSelected={setSelected} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} prefix="RCSO-BOLO" fields={[
+          ["boloType","BOLO-Typ","select",["Individual","Vehicle","Property / Object","Unknown Subject"]],
+          ["subject","Person, Fahrzeug oder Gegenstand","text"],["reason","Grund / Gefahrenhinweis","text"],
+          ["status","Status","select",["Active","Located","Closed","Cancelled"]],["officer","Ausstellender Beamter","text"]
+        ]}/>}
+        {tab==="files"&&<RecordModule employee={employee} title="Akten" kind="files" records={state.files} selected={selected} setSelected={setSelected} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} prefix="RCSO-FILE" fields={[
+          ["title","Aktenbezeichnung","text"],["subject","Betroffene Person / Organisation","text"],
+          ["classification","Klassifikation","select",["Routine","Restricted","Confidential","Command Staff"]],
+          ["status","Status","select",["Open","Under Review","Closed","Archived"]]
+        ]}/>}
+        {tab==="arrests"&&<RecordModule employee={employee} title="Festnahmen" kind="arrests" records={state.arrests} selected={selected} setSelected={setSelected} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} prefix="RCSO-ARR" fields={[
+          ["person","Festgenommene Person","text"],["reason","Festnahmegrund","text"],["location","Ort","text"],["officer","Festnehmender Beamter","text"]
+        ]}/>}
+        {tab==="complaints"&&<RecordModule employee={employee} title="Strafanzeigen" kind="complaints" records={state.complaints} selected={selected} setSelected={setSelected} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} prefix="RCSO-CR" fields={[
+          ["person","Beschuldigte Person","text"],["offense","Tatvorwurf","text"],["complainant","Anzeigenerstatter","text"],
+          ["status","Verfahrensstatus","select",["Filed","Under Investigation","Forwarded","Closed"]]
+        ]}/>}
+        {tab==="admin"&&<Admin employee={employee}/>}
+      </>}
     </section>
-  );
+  </main>
 }
 
-function RecordModule({ title, kind, records, selected, setSelected, addRecord, updateRecord, removeRecord, prefix, fields }) {
-  const current = records.find(item => item.id === selected);
-
-  function submit(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const record = {
-      id: nextId(prefix, records),
-      createdAt: nowIso(),
-      updatedAt: nowIso()
-    };
-    for (const [key] of fields) record[key] = form.get(key);
-    record.notes = form.get("notes");
-    addRecord(kind, record);
-    event.currentTarget.reset();
-  }
-
-  return (
-    <div className="record-layout">
-      <section className="panel list-panel">
-        <div className="panel-header">{title.toUpperCase()}</div>
-        <form className="record-form" onSubmit={submit}>
-          {fields.map(([key,label]) => <label key={key}>{label}<input name={key} required /></label>)}
-          <label>Notizen<textarea name="notes" rows="3" /></label>
-          <button type="submit">＋ Datensatz anlegen</button>
-        </form>
-        <div className="record-list">
-          {records.map(item => (
-            <button key={item.id} className={selected === item.id ? "selected" : ""} onClick={() => setSelected(item.id)}>
-              <strong>{item.id}</strong>
-              <span>{item.person || item.subject || item.title || item.name || item.offense}</span>
-            </button>
-          ))}
-          {records.length === 0 && <p>Keine Datensätze vorhanden.</p>}
-        </div>
-      </section>
-
-      <section className="panel detail-panel">
-        <div className="panel-header">DETAILANSICHT</div>
-        {!current ? <p>Datensatz auswählen.</p> : (
-          <div className="record-detail">
-            <h2>{current.id}</h2>
-            {fields.map(([key,label]) => <p key={key}><strong>{label}:</strong> {current[key] || "—"}</p>)}
-            <p><strong>Erstellt:</strong> {fmt(current.createdAt)}</p>
-            <p><strong>Notizen:</strong><br />{current.notes || "—"}</p>
-            <div className="detail-actions">
-              <button onClick={() => {
-                const changes = {};
-                for (const [key,label] of fields) {
-                  const value = prompt(label, current[key] || "");
-                  if (value === null) return;
-                  changes[key] = value;
-                }
-                updateRecord(kind, current.id, changes);
-              }}>Bearbeiten</button>
-              <button className="danger" onClick={() => removeRecord(kind, current.id)}>Löschen</button>
-            </div>
-          </div>
-        )}
-      </section>
-    </div>
-  );
+function SearchResults({filtered,setTab,setSelected,setSearch}){
+  return <div className="search-results"><div className="panel-header">SUCHERGEBNISSE</div>
+    {(filtered||[]).map(({kind,item})=><button key={`${kind}-${item.id}`} onClick={()=>{setTab(kind);setSelected(item.id);setSearch("")}}><strong>{item.id}</strong><span>{item.subject||item.person||item.title||item.offense||"Datensatz"}</span></button>)}
+    {filtered?.length===0&&<p>Keine Treffer.</p>}</div>
 }
 
-function Admin({ employee }) {
-  const [employees, setEmployees] = useState([]);
-  const [message, setMessage] = useState("");
+function Home({state,employee,setTab}){
+  const recent=[...state.bolos.map(x=>({...x,module:"BOLO",tab:"bolos"})),...state.files.map(x=>({...x,module:"Akte",tab:"files"})),...state.arrests.map(x=>({...x,module:"Festnahme",tab:"arrests"})),...state.complaints.map(x=>({...x,module:"Strafanzeige",tab:"complaints"}))]
+    .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).slice(0,7);
+  return <div className="home-layout">
+    <section className="welcome-panel"><div className="panel-header">RCSO TERMINAL</div><div className="welcome-body"><h2>Willkommen, {employee.displayName}</h2>
+      <p>Dieses Terminal dient der internen Bearbeitung von Fahndungen, Akten, Festnahmen und Strafanzeigen des Riverside County Sheriff&apos;s Office.</p>
+      <div className="role-brief"><strong>{roleLabels[employee.role]}</strong><span>{roleDescriptions[employee.role]}</span></div></div></section>
+    <section className="panel recent-panel"><div className="panel-header">ZULETZT BEARBEITETE VORGÄNGE</div><div className="recent-list">
+      {recent.map(x=><button key={`${x.module}-${x.id}`} onClick={()=>setTab(x.tab)}><span>{x.module}</span><strong>{x.id}</strong><small>{x.subject||x.person||x.title||x.offense||"Datensatz"}</small></button>)}
+      {!recent.length&&<p>Noch keine Vorgänge vorhanden.</p>}</div></section>
+    <section className="quick-actions">
+      <button onClick={()=>setTab("bolos")}><strong>{state.bolos.filter(x=>x.status==="Active").length}</strong><span>Aktive BOLOs</span></button>
+      <button onClick={()=>setTab("files")}><strong>{state.files.filter(x=>!["Closed","Archived"].includes(x.status)).length}</strong><span>Offene Akten</span></button>
+      <button onClick={()=>setTab("complaints")}><strong>{state.complaints.filter(x=>x.status!=="Closed").length}</strong><span>Offene Strafanzeigen</span></button>
+    </section>
+  </div>
+}
 
-  async function load() {
-    const response = await fetch("/api/admin/employees", { cache: "no-store" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setMessage(payload.error || "Keine Berechtigung.");
-      return;
-    }
-    setEmployees(payload.employees);
-  }
+function EmployeeDirectory({employee}){
+  return <section className="panel"><div className="panel-header">MITARBEITERLISTE</div>
+    <div className="directory-info"><p>Die Sheriff-Mitarbeiter besitzen unterschiedliche Rollen und Berechtigungen.</p>
+      {Object.entries(roleDescriptions).map(([role,text])=><div key={role}><strong>{roleLabels[role]}</strong><span>{text}</span></div>)}
+      <p className="small-note">Die vollständige Kontenliste befindet sich aus Sicherheitsgründen im separat entsperrten Admin-Menü.</p></div></section>
+}
 
-  useEffect(() => {
-    if (employee.role === "sheriff_admin") load();
-  }, [employee.role]);
+function Field({name,label,type="text",options=[]}){
+  return type==="select"?<label>{label}<select name={name}>{options.map(x=><option key={x}>{x}</option>)}</select></label>:<label>{label}<input name={name} required/></label>
+}
 
-  async function create(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/admin/employees", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        employeeKey: form.get("employeeKey"),
-        displayName: form.get("displayName"),
-        validationCode: form.get("validationCode"),
-        role: form.get("role")
-      })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return setMessage(payload.error || "Fehler");
-    event.currentTarget.reset();
-    setMessage("Mitarbeiterkonto angelegt.");
-    await load();
-  }
+function RecordModule({employee,title,kind,records,selected,setSelected,addRecord,updateRecord,removeRecord,prefix,fields}){
+  const current=records.find(x=>x.id===selected), mayCreate=can(employee,"create",kind), mayEdit=can(employee,"edit",kind), mayDelete=can(employee,"delete",kind);
+  function submit(e){e.preventDefault();const f=new FormData(e.currentTarget);const record={id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName};for(const [key] of fields)record[key]=f.get(key);record.notes=f.get("notes");addRecord(kind,record);e.currentTarget.reset()}
+  return <div className="record-layout">
+    <section className="panel list-panel"><div className="panel-header">{title.toUpperCase()}</div>
+      {mayCreate?<form className="record-form" onSubmit={submit}>{fields.map(([k,l,t,o])=><Field key={k} name={k} label={l} type={t} options={o}/>)}<label>Notizen<textarea name="notes" rows="3"/></label><button type="submit">＋ Datensatz anlegen</button></form>:<div className="permission-note">Ihre Rolle darf hier keine neuen Datensätze anlegen.</div>}
+      <div className="record-list">{records.map(x=><button key={x.id} className={selected===x.id?"selected":""} onClick={()=>setSelected(x.id)}><strong>{x.id}</strong><span>{x.subject||x.person||x.title||x.offense}</span></button>)}{!records.length&&<p>Keine Datensätze vorhanden.</p>}</div></section>
+    <section className="panel detail-panel"><div className="panel-header">DETAILANSICHT</div>{!current?<p>Datensatz auswählen.</p>:<div className="record-detail"><h2>{current.id}</h2>
+      {fields.map(([k,l])=><p key={k}><strong>{l}:</strong> {current[k]||"—"}</p>)}<p><strong>Erstellt:</strong> {fmt(current.createdAt)}</p><p><strong>Erstellt durch:</strong> {current.createdBy||"—"}</p><p><strong>Notizen:</strong><br/>{current.notes||"—"}</p>
+      <div className="detail-actions">{mayEdit&&<button onClick={()=>{const changes={};for(const [k,l] of fields){const v=prompt(l,current[k]||"");if(v===null)return;changes[k]=v}updateRecord(kind,current.id,changes)}}>Bearbeiten</button>}{mayDelete&&<button className="danger" onClick={()=>removeRecord(kind,current.id)}>Löschen</button>}</div></div>}</section>
+  </div>
+}
 
-  if (employee.role !== "sheriff_admin") {
-    return <section className="panel"><div className="panel-header">ADMIN-MENÜ</div><p>Keine Administratorberechtigung.</p></section>;
-  }
-
-  return (
-    <div className="admin-layout">
-      <section className="panel">
-        <div className="panel-header">MITARBEITER ANLEGEN</div>
-        <form className="record-form" onSubmit={create}>
-          <label>Mitarbeiterkennung<input name="employeeKey" required /></label>
-          <label>Anzeigename<input name="displayName" required /></label>
-          <label>Validierungscode<input name="validationCode" type="password" minLength="8" required /></label>
-          <label>Rolle<select name="role">
-            <option value="deputy">Deputy</option>
-            <option value="supervisor">Supervisor</option>
-            <option value="dispatcher">Dispatcher</option>
-            <option value="read_only">Nur Lesen</option>
-            <option value="sheriff_admin">Sheriff Administrator</option>
-          </select></label>
-          <button type="submit">Mitarbeiterkonto anlegen</button>
-        </form>
-        <p>{message}</p>
-      </section>
-      <section className="panel">
-        <div className="panel-header">KONTEN</div>
-        <table><thead><tr><th>Kennung</th><th>Name</th><th>Rolle</th><th>Status</th></tr></thead>
-        <tbody>{employees.map(e => <tr key={e.id}><td>{e.employee_key}</td><td>{e.display_name}</td><td>{roleLabels[e.role]}</td><td>{e.status}</td></tr>)}</tbody></table>
-      </section>
-    </div>
-  );
+function Admin({employee}){
+  const [unlocked,setUnlocked]=useState(false),[employees,setEmployees]=useState([]),[message,setMessage]=useState("");
+  useEffect(()=>{fetch("/api/admin/status",{cache:"no-store"}).then(r=>r.json()).then(p=>{setUnlocked(!!p.unlocked);if(p.unlocked)load()})},[]);
+  async function unlock(e){e.preventDefault();const f=new FormData(e.currentTarget);const r=await fetch("/api/admin/unlock",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({adminCode:f.get("adminCode")})});const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Admin-Zugang fehlgeschlagen.");setUnlocked(true);setMessage("");await load()}
+  async function lock(){await fetch("/api/admin/lock",{method:"POST"});setUnlocked(false);setEmployees([])}
+  async function load(){const r=await fetch("/api/admin/employees",{cache:"no-store"});const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Mitarbeiterliste konnte nicht geladen werden.");setEmployees(p.employees)}
+  async function create(e){e.preventDefault();const f=new FormData(e.currentTarget);const r=await fetch("/api/admin/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employeeKey:f.get("employeeKey"),displayName:f.get("displayName"),validationCode:f.get("validationCode"),role:f.get("role")})});const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");e.currentTarget.reset();setMessage("Mitarbeiterkonto angelegt.");await load()}
+  if(employee.role!=="sheriff_admin")return <section className="panel admin-denied"><div className="panel-header">ADMIN-MENÜ</div><p>Nur ein Sheriff Administrator kann diesen Bereich öffnen.</p></section>;
+  if(!unlocked)return <section className="admin-unlock"><img src="/rcso-logo.png" alt=""/><form onSubmit={unlock}><div className="panel-header">ADMINISTRATIVE AUTORISIERUNG</div><p>Zusätzlich zum persönlichen Konto ist der zentrale Administrationscode erforderlich.</p><label>Administrationscode<input name="adminCode" type="password" required autoFocus/></label><button type="submit">Admin-Menü entsperren</button><div className="message">{message}</div></form></section>;
+  return <div className="admin-layout"><section className="panel"><div className="panel-header">MITARBEITER ANLEGEN</div><form className="record-form" onSubmit={create}>
+    <label>Mitarbeiterkennung<input name="employeeKey" required/></label><label>Anzeigename<input name="displayName" required/></label><label>Persönlicher Validierungscode<input name="validationCode" type="password" minLength="8" required/></label>
+    <label>Rang / Rolle<select name="role"><option value="deputy">Deputy</option><option value="supervisor">Supervisor</option><option value="dispatcher">Dispatcher</option><option value="read_only">Nur Lesen</option><option value="sheriff_admin">Sheriff Administrator</option></select></label>
+    <button type="submit">Mitarbeiterkonto anlegen</button></form><p>{message}</p><button className="lock-button" onClick={lock}>Admin-Menü sperren</button></section>
+    <section className="panel"><div className="panel-header">MITARBEITERKONTEN</div><table><thead><tr><th>Kennung</th><th>Name</th><th>Rang / Rolle</th><th>Status</th></tr></thead><tbody>{employees.map(e=><tr key={e.id}><td>{e.employee_key}</td><td>{e.display_name}</td><td>{roleLabels[e.role]}</td><td>{e.status}</td></tr>)}</tbody></table></section></div>
 }

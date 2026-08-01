@@ -1,66 +1,28 @@
-# Riverside County Sheriff's Office Terminal v0.1.0
+# Riverside County Sheriff's Office Terminal v0.2.0
 
-Separate Sheriff terminal for GitHub + Vercel.
+## Included changes
 
-## Included modules
+- Official Sheriff badge as login logo, header logo, favicon, shortcut and app icon.
+- Brown, bronze, ochre and parchment interface based on the badge wreath.
+- Explicit contrast-safe text colors for every light and dark surface.
+- BOLO type selection: Individual, Vehicle, Property / Object, Unknown Subject.
+- Cleaner homepage with welcome panel, role briefing, recent records and compact counters.
+- Separate Admin Menu authorization using `RCSO_INITIAL_ADMIN_CODE`.
+- Admin unlock is limited to Sheriff Administrator accounts and lasts 30 minutes.
+- Operational role permissions:
+  - Sheriff Administrator: full access plus separately unlocked employee administration.
+  - Supervisor: create, edit and delete operational records.
+  - Deputy: create and edit, but not delete.
+  - Dispatcher: create/edit BOLOs; other modules read-only.
+  - Read Only: view only.
 
-- Homepage
-- Mitarbeiterliste
-- BOLOs
-- Akten
-- Festnahmen
-- Strafanzeigen
-- Admin-Menü
-- Shared Neon state for all Sheriff users
-- Server-side login with signed cookies
-- Employee creation
-- Audit logging
-- Version-conflict protection
-- Automatic refresh every 8 seconds
-- Global terminal search
+No SQL migration is required.
 
-## Neon is required
+Environment variables:
+- DATABASE_URL
+- RCSO_SESSION_SECRET
+- RCSO_INITIAL_ADMIN_CODE
 
-Without Neon, each browser would only have its own local data. This project is already prepared for Neon.
-
-You may use:
-
-1. A new separate Neon project, recommended for now; or
-2. The same Neon project as RCDF, using these separate `rcso_*` tables.
-
-It is not yet connected to RCDF or any shared county tables.
-
-## Vercel environment variables
-
-Add:
-
-```text
-DATABASE_URL=<your Neon pooled connection string>
-RCSO_SESSION_SECRET=<long random secret, at least 24 characters>
-RCSO_INITIAL_ADMIN_CODE=<temporary first admin validation code>
-```
-
-`RCSO_INITIAL_ADMIN_CODE` is used only when the employee table is empty.
-
-Initial employee key:
-
-```text
-Sheriff 1001
-```
-
-After first login, create a proper administrator account in the Admin-Menü and remove or deactivate the bootstrap account later.
-
-## Deployment
-
-1. Create a new private GitHub repository.
-2. Upload the complete folder contents.
-3. Import the repository into Vercel as a new project.
-4. Add the three environment variables.
-5. Deploy.
-6. Open the production URL.
-
-The database tables are created automatically on first request.
-
-## Security note
-
-Do not use `CHANGE-ME-1234` as a real code. Set `RCSO_INITIAL_ADMIN_CODE` in Vercel before the first deployment.
+Initial login:
+- Employee key: Sheriff 1001
+- Validation code: value of RCSO_INITIAL_ADMIN_CODE

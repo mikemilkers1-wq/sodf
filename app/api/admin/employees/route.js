@@ -2,13 +2,14 @@ import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ensureDatabase } from "@/lib/setup";
-import { requireSession } from "@/lib/auth";
+import { requireSession, hasAdminAccess } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 async function requireAdmin() {
   const employee = await requireSession();
   if (!employee || employee.role !== "sheriff_admin") return null;
+  if (!(await hasAdminAccess())) return null;
   return employee;
 }
 
