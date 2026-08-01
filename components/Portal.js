@@ -267,42 +267,6 @@ function RecordModule({employee,title,kind,records,selected,setSelected,addRecor
 }
 
 
-function openIdentityEditor(person, action){
-  const legalFirstName=prompt("Vorname:",person.legal_first_name||"");if(legalFirstName===null)return;
-  const legalMiddleName=prompt("Zweiter Vorname:",person.legal_middle_name||"");if(legalMiddleName===null)return;
-  const legalLastName=prompt("Nachname:",person.legal_last_name||"");if(legalLastName===null)return;
-  const dateOfBirth=prompt("Geburtsdatum (YYYY-MM-DD):",person.date_of_birth||"");if(dateOfBirth===null)return;
-  const sex=prompt("Geschlecht:",person.sex||"");if(sex===null)return;
-  const primaryPhone=prompt("Telefon:",person.primary_phone||"");if(primaryPhone===null)return;
-  const primaryEmail=prompt("E-Mail:",person.primary_email||"");if(primaryEmail===null)return;
-  const purpose=prompt("Korrekturgrund / Quelle:");if(!purpose)return;
-  action({action:"update_person",personId:person.public_id,legalFirstName,legalMiddleName,legalLastName,dateOfBirth,sex,primaryPhone,primaryEmail,generalNotes:person.general_notes||"",purpose});
-}
-function openAddressEditor(person, action){
-  const line1=prompt("Straße und Hausnummer:");if(!line1)return;
-  const city=prompt("Stadt:");if(!city)return;
-  const stateCode=prompt("Bundesstaat:","CA")||"CA";
-  const postalCode=prompt("ZIP Code:")||"";
-  const source=prompt("Quelle / Begründung:");if(!source)return;
-  action({action:"add_address",personId:person.public_id,line1,city,stateCode,postalCode,addressType:"residential",isCurrent:true,verified:false,source});
-}
-function openRoleEditor(person, action){
-  const roleType=prompt("Rollentyp (law_enforcement, government_employee, elected_official, appointed_official, military, other):","law_enforcement");if(!roleType)return;
-  const organization=prompt("Organisation / Department:");if(!organization)return;
-  const titleOrRank=prompt("Titel / Rang:")||"";
-  const badgeNumber=prompt("Badge Number (optional):")||"";
-  const employeeNumber=prompt("Employee Number (optional):")||"";
-  const jurisdiction=prompt("Jurisdiction:","Riverside County")||"";
-  const source=prompt("Quelle:");if(!source)return;
-  action({action:"add_role",personId:person.public_id,roleType,organization,titleOrRank,badgeNumber,employeeNumber,jurisdiction,status:"active",source});
-}
-function openRelationshipEditor(person, action){
-  const relatedPersonId=prompt("Person-ID der verbundenen Person:");if(!relatedPersonId)return;
-  const relationshipType=prompt("Beziehung (spouse, parent, child, sibling, household member, business associate …):");if(!relationshipType)return;
-  const source=prompt("Quelle:");if(!source)return;
-  action({action:"add_relationship",personId:person.public_id,relatedPersonId:relatedPersonId.trim().toUpperCase(),relationshipType,verified:false,confidence:"reported",source});
-}
-
 function Admin({employee}){
   const [unlocked,setUnlocked]=useState(false),[employees,setEmployees]=useState([]),[message,setMessage]=useState("");
   useEffect(()=>{fetch("/api/admin/status",{cache:"no-store"}).then(r=>r.json()).then(p=>{setUnlocked(!!p.unlocked);if(p.unlocked)load()})},[]);
@@ -320,77 +284,118 @@ function Admin({employee}){
 }
 
 
-function PersonRegister({employee}){
-  const [query,setQuery]=useState(""),[people,setPeople]=useState([]),[person,setPerson]=useState(null),[message,setMessage]=useState("");
 
-  async function search(value=query){
-    if(value.trim().length<2)return setPeople([]);
-    const r=await fetch(`/api/person-register?q=${encodeURIComponent(value)}&purpose=Law enforcement person inquiry`,{cache:"no-store"});
-    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Suche fehlgeschlagen.");setPeople(p.people||[]);
+function PersonModal({config,onClose}){
+  if(!config)return null;
+  async function submit(e){e.preventDefault();await config.onSubmit(new FormData(e.currentTarget))}
+  return <div className="person-modal-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
+    <section className="person-modal-dialog">
+      <header><strong>{config.title}</strong><button type="button" onClick={onClose}>×</button></header>
+      <form onSubmit={submit}>
+        <div className="person-modal-body">{config.body}</div>
+        <div className="person-modal-actions"><button type="button" onClick={onClose}>Abbrechen</button><button type="submit">{config.submitLabel||"Speichern"}</button></div>
+      </form>
+    </section>
+  </div>
+}
+
+function TextField({label,name,defaultValue="",type="text",required=false,className=""}){
+  return <label className={className}>{label}<input name={name} type={type} defaultValue={defaultValue||""} required={required}/></label>
+}
+function SelectField({label,name,defaultValue="",options=[]}){
+  return <label>{label}<select name={name} defaultValue={defaultValue}>{options.map(o=><option key={o} value={o}>{o}</option>)}</select></label>
+}
+
+function PersonRegister({employee}){
+  const [query,setQuery]=useState(""),[people,setPeople]=useState([]),[person,setPerson]=useState(null),[message,setMessage]=useState(""),[modal,setModal]=useState(null);
+
+  async function request(payload,method="POST"){
+    const response=await fetch(method==="GET"?`/api/person-register?${new URLSearchParams(payload)}`:"/api/person-register",method==="GET"?{cache:"no-store"}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"Personregister-Aktion fehlgeschlagen.");return result;
   }
-  async function open(id){
-    const r=await fetch(`/api/person-register?id=${encodeURIComponent(id)}&purpose=Law enforcement profile review`,{cache:"no-store"});
-    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Profil konnte nicht geladen werden.");setPerson(p.person);
+  async function search(value=query){if(value.trim().length<2)return setPeople([]);try{const p=await request({q:value,purpose:"RCSO person inquiry"},"GET");setPeople(p.people||[])}catch(e){setMessage(e.message)}}
+  async function open(id){try{const p=await request({id,purpose:"RCSO profile review"},"GET");setPerson(p.person)}catch(e){setMessage(e.message)}}
+  async function act(payload){try{const p=await request(payload);if(p.person)setPerson(p.person);setModal(null);setMessage("Personregister aktualisiert.")}catch(e){setMessage(e.message);throw e}}
+
+  function coreModal(){
+    setModal({title:"Personenstammdaten bearbeiten",body:<div className="person-form-grid">
+      <TextField label="Vorname" name="legalFirstName" defaultValue={person.legal_first_name} required/><TextField label="Zweiter Vorname" name="legalMiddleName" defaultValue={person.legal_middle_name}/>
+      <TextField label="Nachname" name="legalLastName" defaultValue={person.legal_last_name} required/><TextField label="Geburtsdatum" name="dateOfBirth" type="date" defaultValue={person.date_of_birth}/>
+      <TextField label="Geschlecht" name="sex" defaultValue={person.sex}/><TextField label="Telefon" name="primaryPhone" defaultValue={person.primary_phone}/>
+      <TextField label="E-Mail" name="primaryEmail" type="email" defaultValue={person.primary_email}/><label className="span-2">Notiz<textarea name="generalNotes" defaultValue={person.general_notes||""}/></label>
+      <TextField label="Korrekturgrund / Quelle" name="purpose" required className="span-2"/>
+    </div>,onSubmit:f=>act({action:"update_person",personId:person.public_id,...Object.fromEntries(f)})});
   }
-  async function action(payload){
-    const r=await fetch("/api/person-register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Aktion fehlgeschlagen.");setPerson(p.person);setMessage("Personregister aktualisiert.");
+  function addressModal(a=null){
+    setModal({title:a?"Adresse bearbeiten":"Adresse hinzufügen",body:<div className="person-form-grid">
+      <TextField label="Straße / Hausnummer" name="line1" defaultValue={a?.line1} required className="span-2"/><TextField label="Zusatz" name="line2" defaultValue={a?.line2}/>
+      <TextField label="Stadt" name="city" defaultValue={a?.city} required/><TextField label="Bundesstaat" name="stateCode" defaultValue={a?.state_code||"CA"} required/>
+      <TextField label="ZIP Code" name="postalCode" defaultValue={a?.postal_code}/><SelectField label="Adressart" name="addressType" defaultValue={a?.address_type||"residential"} options={["residential","mailing","business","temporary","property"]}/>
+      <label><input name="isCurrent" type="checkbox" defaultChecked={a?a.is_current:true}/> Aktuelle Adresse</label><label><input name="verified" type="checkbox" defaultChecked={!!a?.verified}/> Verifiziert</label>
+      <TextField label="Quelle" name="source" defaultValue={a?.source} required/>{a&&<TextField label="Revisionsgrund" name="reason" required/>}
+    </div>,onSubmit:f=>act({action:a?"update_address":"add_address",personId:person.public_id,id:a?.id,...Object.fromEntries(f),isCurrent:f.has("isCurrent"),verified:f.has("verified")})});
   }
-  function create(e){
-    e.preventDefault();const f=new FormData(e.currentTarget);
-    action({action:"create_person",legalFirstName:f.get("first"),legalMiddleName:f.get("middle"),legalLastName:f.get("last"),
-      dateOfBirth:f.get("dob"),sex:f.get("sex"),creationReason:f.get("reason"),sourceRecord:f.get("source"),generalNotes:f.get("notes")})
-      .then(()=>e.currentTarget.reset());
+  function roleModal(r=null){
+    setModal({title:r?"LEO-/Behördenrolle bearbeiten":"LEO-/Behördenrolle hinzufügen",body:<div className="person-form-grid">
+      <SelectField label="Rollentyp" name="roleType" defaultValue={r?.role_type||"law_enforcement"} options={["law_enforcement","government_employee","elected_official","appointed_official","military","other"]}/>
+      <TextField label="Organisation" name="organization" defaultValue={r?.organization} required/><TextField label="Titel / Rang" name="titleOrRank" defaultValue={r?.title_or_rank}/>
+      <TextField label="Badge Number" name="badgeNumber" defaultValue={r?.badge_number}/><TextField label="Employee Number" name="employeeNumber" defaultValue={r?.employee_number}/>
+      <TextField label="Jurisdiction" name="jurisdiction" defaultValue={r?.jurisdiction}/><TextField label="Beginn" name="startsAt" type="date" defaultValue={r?.starts_at}/>
+      <TextField label="Ende" name="endsAt" type="date" defaultValue={r?.ends_at}/><SelectField label="Status" name="status" defaultValue={r?.status||"active"} options={["active","ended","revoked","suspended"]}/>
+      <TextField label="Quelle" name="source" defaultValue={r?.source} required/>{r&&<TextField label="Revisionsgrund" name="reason" required className="span-2"/>}
+    </div>,onSubmit:f=>act({action:r?"update_role":"add_role",personId:person.public_id,id:r?.id,...Object.fromEntries(f)})});
   }
-  function uploadPhoto(e){
-    const file=e.target.files?.[0];if(!file)return;if(file.size>2_000_000)return setMessage("Das Foto darf höchstens ungefähr 2 MB groß sein.");
-    const reader=new FileReader();reader.onload=()=>action({action:"add_photo",personId:person.public_id,photoType:"mugshot",
-      imageDataUrl:reader.result,sourceRecord:"Manual RCSO upload",isPrimary:true});reader.readAsDataURL(file);
+  function relationModal(r=null){
+    setModal({title:r?"Beziehung bearbeiten":"Beziehung hinzufügen",body:<div className="person-form-grid">
+      <TextField label="Verbundene Person-ID" name="relatedPersonId" defaultValue={r?.related_person_id} required/><TextField label="Beziehung auf diesem Profil" name="relationshipType" defaultValue={r?.relationship_type} required/>
+      <TextField label="Gegenbeziehung" name="inverseRelationshipType"/><SelectField label="Vertrauen" name="confidence" defaultValue={r?.confidence||"reported"} options={["reported","probable","verified"]}/>
+      <label><input name="verified" type="checkbox" defaultChecked={!!r?.verified}/> Verifiziert</label><TextField label="Beginn" name="effectiveFrom" type="date" defaultValue={r?.effective_from}/>
+      <TextField label="Ende" name="effectiveTo" type="date" defaultValue={r?.effective_to}/><TextField label="Quelle" name="source" defaultValue={r?.source} required/>
+      {r&&<TextField label="Revisionsgrund" name="reason" required className="span-2"/>}
+    </div>,onSubmit:f=>act({action:r?"update_relationship":"add_relationship",personId:person.public_id,id:r?.id,...Object.fromEntries(f),verified:f.has("verified")})});
   }
+  function aliasModal(a=null){
+    setModal({title:a?"Alias bearbeiten":"Alias hinzufügen",body:<div className="person-form-grid">
+      <TextField label="Vorname" name="firstName" defaultValue={a?.first_name}/><TextField label="Zweiter Vorname" name="middleName" defaultValue={a?.middle_name}/>
+      <TextField label="Nachname" name="lastName" defaultValue={a?.last_name} required/><TextField label="Alias-Typ" name="aliasType" defaultValue={a?.alias_type||"alias"}/>
+      <label><input name="verified" type="checkbox" defaultChecked={!!a?.verified}/> Verifiziert</label><TextField label="Quelle" name="source" defaultValue={a?.source} required/>
+      {a&&<TextField label="Revisionsgrund" name="reason" required className="span-2"/>}
+    </div>,onSubmit:f=>act({action:a?"update_alias":"add_alias",personId:person.public_id,id:a?.id,...Object.fromEntries(f),verified:f.has("verified")})});
+  }
+  function eventModal(ev=null){
+    setModal({title:ev?"Ereignis revidieren":"Ereignis hinzufügen",body:<div className="person-form-grid">
+      <SelectField label="Kategorie" name="eventCategory" defaultValue={ev?.event_category||"other"} options={["questioning","citation","incident","complaint","arrest","charge","court_disposition","conviction","acquittal","dismissal","jail_booking","jail_release","prison_admission","prison_release","parole","probation","other"]}/>
+      <TextField label="Status" name="eventStatus" defaultValue={ev?.event_status}/><TextField label="Titel" name="title" defaultValue={ev?.title} required className="span-2"/>
+      <TextField label="Zeitpunkt" name="occurredAt" type="datetime-local" defaultValue={ev?.occurred_at?.slice?.(0,16)}/><TextField label="Ende" name="endedAt" type="datetime-local" defaultValue={ev?.ended_at?.slice?.(0,16)}/>
+      <TextField label="Quellvorgang" name="sourceRecord" defaultValue={ev?.source_record}/><TextField label="Disposition" name="disposition" defaultValue={ev?.disposition}/>
+      <label className="span-2">Zusammenfassung<textarea name="summary" defaultValue={ev?.summary||""}/></label><label><input name="restricted" type="checkbox" defaultChecked={!!ev?.restricted}/> Eingeschränkt</label>
+      {ev&&<TextField label="Revisionsgrund" name="reason" required className="span-2"/>}
+    </div>,onSubmit:f=>act({action:ev?"update_event":"add_event",personId:person.public_id,id:ev?.id,...Object.fromEntries(f),restricted:f.has("restricted")})});
+  }
+  function removeModal(kind,id){
+    const action={address:"delete_address",role:"delete_role",relationship:"delete_relationship",alias:"delete_alias",event:"void_event",photo:"delete_photo"}[kind];
+    setModal({title:"Eintrag entfernen",submitLabel:"Entfernen",body:<div><p>Die Aktion wird protokolliert. Criminal- und Custody-Ereignisse werden als ungültig markiert.</p><label>Begründung<textarea name="reason" required/></label></div>,onSubmit:f=>act({action,personId:person.public_id,id,reason:f.get("reason")})});
+  }
+  async function uploadPhoto(e){const file=e.target.files?.[0];if(!file)return;if(file.size>2_000_000)return setMessage("Foto zu groß.");const reader=new FileReader();reader.onload=()=>act({action:"add_photo",personId:person.public_id,photoType:"mugshot",imageDataUrl:reader.result,sourceRecord:"RCSO upload",isPrimary:true});reader.readAsDataURL(file)}
 
   return <div className="person-register-layout">
+    <PersonModal config={modal} onClose={()=>setModal(null)}/>
     <section className="panel person-search-panel"><div className="panel-header">PERSONREGISTER</div>
-      <div className="person-search-row"><input value={query} onChange={e=>{setQuery(e.target.value);search(e.target.value)}} placeholder="Name, Alias, Adresse, Person-ID oder Badge-Nr."/><button onClick={()=>search()}>Suchen</button></div>
-      <div className="person-result-list">{people.map(p=><button key={p.public_id} onClick={()=>open(p.public_id)}>
-        {p.primary_photo?<img src={p.primary_photo} alt=""/>:<span className="person-placeholder">◉</span>}
-        <strong>{p.legal_first_name} {p.legal_middle_name||""} {p.legal_last_name}</strong>
-        <small>{p.public_id} • DOB {p.date_of_birth||"—"} • {p.status}</small><small>{p.current_address||"Keine aktuelle Adresse"}</small>
-      </button>)}</div>
-      <details className="create-person-box"><summary>Neue Person erfassen</summary><form onSubmit={create}>
-        <label>Vorname<input name="first" required/></label><label>Zweiter Vorname<input name="middle"/></label>
-        <label>Nachname<input name="last" required/></label><label>Geburtsdatum<input name="dob" type="date"/></label>
-        <label>Geschlecht<select name="sex"><option value="">—</option><option>Male</option><option>Female</option><option>Unknown</option></select></label>
-        <label>Erfassungsgrund<input name="reason" required placeholder="Arrest, questioning, citation …"/></label>
-        <label>Quellvorgang<input name="source" placeholder="RCSO-ARR-..."/></label><label>Notizen<textarea name="notes"/></label>
-        <button type="submit">Person-ID anlegen</button></form></details>
-      <div className="message">{message}</div>
+      <div className="person-search-row"><input value={query} onChange={e=>{setQuery(e.target.value);clearTimeout(window.__rcsoPersonTimer);window.__rcsoPersonTimer=setTimeout(()=>search(e.target.value),250)}} placeholder="Name, Adresse oder Person-ID"/><button onClick={()=>search()}>Suchen</button></div>
+      <div className="person-result-list">{people.map(p=><button key={p.public_id} onClick={()=>open(p.public_id)}><strong>{p.public_id}</strong><span>{p.legal_first_name} {p.legal_last_name}</span><small>{p.current_address||"Keine aktuelle Adresse"}</small></button>)}</div><div className="message">{message}</div>
     </section>
     <section className="panel person-profile-panel"><div className="panel-header">PERSONENPROFIL</div>
       {!person?<p>Person auswählen.</p>:<div className="person-profile">
-        <header>{person.photos?.[0]?<img src={person.photos[0].image_data_url} alt="Person"/>:<div className="profile-photo-placeholder">NO PHOTO</div>}
-          <div><h2>{person.legal_first_name} {person.legal_middle_name||""} {person.legal_last_name}</h2>
-          <strong>{person.public_id}</strong><p>Status: {person.status}</p></div></header>
-        <div className="profile-grid"><section><h3>Core Identity</h3><p>DOB: {person.date_of_birth||"—"}</p><p>Sex: {person.sex||"—"}</p>
-          <p>Height: {person.height_cm||"—"} cm</p><p>Weight: {person.weight_kg||"—"} kg</p><p>Eyes: {person.eye_color||"—"}</p><p>Hair: {person.hair_color||"—"}</p>
-          <p>SSN: {person.ssn_masked||"—"}</p><p>Driver License: {person.driver_license_masked||"—"}</p></section>
-          <section><h3>Addresses</h3>{person.addresses?.map(a=><p key={a.id}>{a.line1}, {a.city}, {a.state_code} {a.postal_code||""} {a.is_current?"(current)":""}</p>)||null}</section>
-          <section><h3>Aliases</h3>{person.aliases?.map(a=><p key={a.id}>{a.first_name||""} {a.middle_name||""} {a.last_name}</p>)||null}</section>
-          <section><h3>Government / LEO Roles</h3>{person.roles?.map(r=><p key={r.id}>{r.organization} — {r.title_or_rank||r.role_type} {r.badge_number?`Badge ${r.badge_number}`:""}</p>)||null}</section>
+        <header>{person.photos?.[0]?<img src={person.photos[0].image_data_url} alt="Person"/>:<div className="profile-photo-placeholder">NO PHOTO</div>}<div><h2>{person.legal_first_name} {person.legal_middle_name||""} {person.legal_last_name}</h2><strong>{person.public_id}</strong><p>Status: {person.status}</p></div></header>
+        <div className="profile-grid"><section><h3>Core Identity</h3><p>DOB: {person.date_of_birth||"—"}</p><p>Sex: {person.sex||"—"}</p><p>Phone: {person.primary_phone||"—"}</p><p>Email: {person.primary_email||"—"}</p></section>
+          <section><h3>Addresses</h3>{person.addresses?.map(a=><div className="person-data-row" key={a.id}><span>{a.line1}, {a.city}, {a.state_code} {a.postal_code||""} {a.is_current?"(current)":"(previous)"}</span><span><button onClick={()=>addressModal(a)}>Edit</button><button className="danger" onClick={()=>removeModal("address",a.id)}>Remove</button></span></div>)}</section>
+          <section><h3>Aliases</h3>{person.aliases?.map(a=><div className="person-data-row" key={a.id}><span>{a.first_name||""} {a.middle_name||""} {a.last_name}</span><span><button onClick={()=>aliasModal(a)}>Edit</button><button className="danger" onClick={()=>removeModal("alias",a.id)}>Remove</button></span></div>)}</section>
+          <section><h3>Government / LEO Roles</h3>{person.roles?.map(r=><div className="person-data-row" key={r.id}><span>{r.organization} — {r.title_or_rank||r.role_type} — {r.status||"active"}</span><span><button onClick={()=>roleModal(r)}>Edit</button><button className="danger" onClick={()=>removeModal("role",r.id)}>Remove</button></span></div>)}</section>
         </div>
-        <section><h3>Department Links</h3><table><thead><tr><th>Department</th><th>Type</th><th>Record</th><th>Status</th><th>Summary</th><th>Amount</th></tr></thead>
-          <tbody>{person.links?.map(l=><tr key={l.id}><td>{l.department}</td><td>{l.record_type}</td><td>{l.record_id}</td><td>{l.record_status||"—"}</td><td>{l.summary||"—"}</td><td>{l.amount==null?"—":`$${Number(l.amount).toFixed(2)}`}</td></tr>)}</tbody></table></section>
-        <section><h3>Law-Enforcement / Custody History</h3>{person.events?.map(ev=><article className="person-event" key={ev.id}><strong>{ev.event_category}: {ev.title}</strong><span>{ev.event_status||""} • {ev.occurred_at?fmt(ev.occurred_at):"Unknown date"} • {ev.department}</span><p>{ev.summary||"—"}</p></article>)}</section>
-        <section><h3>Relationships</h3>{person.relationships?.map(r=><p key={r.id}>{r.relationship_type}: {r.related_first_name} {r.related_last_name} ({r.related_person_id})</p>)}</section>
-        <div className="person-profile-actions">
-          <label>Mugshot / Foto hinzufügen<input type="file" accept="image/*" onChange={uploadPhoto}/></label>
-          <button onClick={()=>openIdentityEditor(person,action)}>Stammdaten bearbeiten</button>
-          <button onClick={()=>openAddressEditor(person,action)}>Adresse hinzufügen</button>
-          <button onClick={()=>openRoleEditor(person,action)}>LEO / Behördenrolle hinzufügen</button>
-          <button onClick={()=>openRelationshipEditor(person,action)}>Beziehung hinzufügen</button>
-          <button onClick={()=>{const last=prompt("Alias-Nachname");if(last)action({action:"add_alias",personId:person.public_id,lastName:last,source:"RCSO profile update"})}}>Alias hinzufügen</button>
-          <button onClick={()=>{const title=prompt("Ereignisbezeichnung");if(title)action({action:"add_event",personId:person.public_id,eventCategory:"other",title,summary:prompt("Zusammenfassung")||""})}}>Ereignis hinzufügen</button>
-          <button onClick={()=>downloadPersonPdf(person)}>Personenprofil als PDF herunterladen</button>
-        </div>
+        <section><h3>Relationships</h3>{person.relationships?.map(r=><div className="person-data-row" key={r.id}><span>{r.relationship_type}: {r.related_first_name} {r.related_last_name} ({r.related_person_id})</span><span><button onClick={()=>relationModal(r)}>Edit</button><button className="danger" onClick={()=>removeModal("relationship",r.id)}>Remove</button></span></div>)}</section>
+        <section><h3>Law-Enforcement / Custody History</h3>{person.events?.map(ev=><div className="person-data-row person-event" key={ev.id}><div><strong>{ev.event_category}: {ev.title}</strong><span>{ev.event_status||""} • {ev.department}</span><p>{ev.summary||"—"}</p></div><span><button onClick={()=>eventModal(ev)}>Revise</button><button className="danger" onClick={()=>removeModal("event",ev.id)}>Void</button></span></div>)}</section>
+        <section><h3>Photos</h3><div className="person-photo-grid">{person.photos?.map(ph=><figure key={ph.id}><img src={ph.image_data_url}/><figcaption>{ph.photo_type}</figcaption><button className="danger" onClick={()=>removeModal("photo",ph.id)}>Remove</button></figure>)}</div></section>
+        <div className="person-profile-actions"><button onClick={coreModal}>Stammdaten bearbeiten</button><button onClick={()=>addressModal()}>Adresse hinzufügen</button><button onClick={()=>roleModal()}>LEO / Behördenrolle hinzufügen</button><button onClick={()=>relationModal()}>Beziehung hinzufügen</button><button onClick={()=>aliasModal()}>Alias hinzufügen</button><button onClick={()=>eventModal()}>Ereignis hinzufügen</button><label>Foto / Mugshot<input type="file" accept="image/*" onChange={uploadPhoto}/></label><button onClick={()=>downloadPersonPdf(person)}>PDF herunterladen</button></div>
       </div>}
     </section>
   </div>
