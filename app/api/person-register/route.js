@@ -350,6 +350,59 @@ async function synchronizeRincenAccountLinks(sql, accountId, employee) {
   return loadPerson(sql, personId);
 }
 
+
+function inverseRelationshipType(type) {
+  const normalized = String(type || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const map = {
+    spouse: "spouse",
+    former_spouse: "former_spouse",
+    sibling: "sibling",
+    parent: "child",
+    child: "parent",
+    guardian: "ward",
+    ward: "guardian",
+    employer: "employee",
+    employee: "employer",
+    supervisor: "subordinate",
+    subordinate: "supervisor",
+    business_associate: "business_associate",
+    household_member: "household_member",
+    emergency_contact: "emergency_contact_of",
+    emergency_contact_of: "emergency_contact",
+    owner: "owned_by",
+    owned_by: "owner"
+  };
+  return map[normalized] || "related_person";
+}
+
+async function loadRelationshipPair(sql, personId, id) {
+  const rows = await sql`
+    SELECT *
+    FROM county_person_relationships
+    WHERE id = ${Number(id)} AND person_id = ${personId}
+  `;
+  if (!rows.length) return null;
+  const current = rows[0];
+
+  let counterpart = null;
+  if (current.relationship_pair_id) {
+    const reverse = await sql`
+      SELECT *
+      FROM county_person_relationships
+      WHERE relationship_pair_id = ${current.relationship_pair_id}
+        AND id <> ${current.id}
+      LIMIT 1
+    `;
+    counterpart = reverse[0] || null;
+  }
+
+  return { current, counterpart };
+}
+
+async function auditRevision(sql, personId, employee, action, purpose, before, after = null) {
+  await log(sql, personId, employee, action, purpose || 'Person-register revision', { before, after });
+}
+
 export async function GET(request) {
   try {
     await ensureDatabase();
@@ -471,6 +524,73 @@ export async function POST(request) {
     const personId = String(body.personId || "").trim();
     if (!personId) return NextResponse.json({ error: "Person-ID fehlt." }, { status: 400 });
 
+    if (action === "repair_reciprocal_relationships") {
+      if (employee.role !== "sheriff_admin") {
+        return NextResponse.json({ error: "Nur ein Sheriff Administrator darf die Beziehungsreparatur ausführen." }, { status: 403 });
+      }
+
+      await sql`ALTER TABLE county_person_relationships ADD COLUMN IF NOT EXISTS relationship_pair_id UUID`;
+
+      const legacy = await sql`
+        SELECT *
+        FROM county_person_relationships
+        WHERE relationship_pair_id IS NULL
+        ORDER BY id
+      `;
+      let repaired = 0;
+
+      for (const rel of legacy) {
+        const stillExists = await sql`
+          SELECT *
+          FROM county_person_relationships
+          WHERE id = ${rel.id} AND relationship_pair_id IS NULL
+        `;
+        if (!stillExists.length) continue;
+
+        const expectedInverse = inverseRelationshipType(rel.relationship_type);
+        const reverse = await sql`
+          SELECT *
+          FROM county_person_relationships
+          WHERE person_id = ${rel.related_person_id}
+            AND related_person_id = ${rel.person_id}
+            AND relationship_pair_id IS NULL
+          ORDER BY id
+          LIMIT 1
+        `;
+        const pairRows = await sql`SELECT gen_random_uuid() AS id`;
+        const pairId = pairRows[0].id;
+
+        await sql`
+          UPDATE county_person_relationships
+          SET relationship_pair_id = ${pairId}
+          WHERE id = ${rel.id}
+        `;
+
+        if (reverse.length) {
+          await sql`
+            UPDATE county_person_relationships
+            SET relationship_pair_id = ${pairId}
+            WHERE id = ${reverse[0].id}
+          `;
+        } else {
+          await sql`
+            INSERT INTO county_person_relationships
+              (person_id, related_person_id, relationship_type, relationship_pair_id,
+               verified, confidence, source, effective_from, effective_to)
+            VALUES
+              (${rel.related_person_id}, ${rel.person_id}, ${expectedInverse}, ${pairId},
+               ${rel.verified}, ${rel.confidence}, ${rel.source},
+               ${rel.effective_from}, ${rel.effective_to})
+          `;
+        }
+        repaired += 1;
+      }
+
+      await log(sql, null, employee, "RELATIONSHIP_RECIPROCITY_REPAIRED",
+        "Legacy reciprocal relationship repair", { repaired });
+      return NextResponse.json({ ok: true, repaired });
+    }
+
     if (action === "sync_rincen_account") {
       if (DEPARTMENT !== "RINCEN") {
         return NextResponse.json({ error: "Diese Synchronisierung ist nur über RinCEN verfügbar." }, { status: 403 });
@@ -480,8 +600,8 @@ export async function POST(request) {
     }
 
     if (action === "delete_person") {
-      if (employee.role !== "sheriff_admin") {
-        return NextResponse.json({ error: "Nur ein Sheriff Administrator darf einen vollständigen Personeneintrag löschen." }, { status: 403 });
+      if (!["finance_director", "assistant_director"].includes(employee.role)) {
+        return NextResponse.json({ error: "Nur Finance Director oder Assistant Finance Director dürfen einen vollständigen Personeneintrag löschen." }, { status: 403 });
       }
       if (String(body.confirmPersonId || "").trim().toUpperCase() !== personId.toUpperCase()) {
         return NextResponse.json({ error: "Die Bestätigungs-ID stimmt nicht mit der Person-ID überein." }, { status: 400 });
@@ -504,7 +624,7 @@ export async function POST(request) {
         )
       `;
 
-      await removePersonFromRincen(sql, personId);
+      if (DEPARTMENT === "RINCEN") await removePersonFromRincen(sql, personId);
       await sql`DELETE FROM county_people WHERE public_id = ${personId}`;
 
       await sql`
@@ -543,13 +663,14 @@ export async function POST(request) {
           hair_color = ${body.hairColor || null},
           primary_phone = ${body.primaryPhone || null},
           primary_email = ${body.primaryEmail || null},
+          ssn_last4 = COALESCE(${body.ssnLast4?.replace(/\D/g, "").slice(-4) || null}, ssn_last4),
           general_notes = ${body.generalNotes || null},
           updated_at = NOW()
         WHERE public_id = ${personId}
       `;
       await log(sql, personId, employee, "PERSON_IDENTITY_UPDATED",
         body.purpose || "Identity correction", {});
-      await synchronizePersonIntoRincen(sql, personId);
+      if (DEPARTMENT === "RINCEN") await synchronizePersonIntoRincen(sql, personId);
     } else if (action === "set_status") {
       if (!["active","archived","deceased","restricted"].includes(body.status)) {
         return NextResponse.json({ error: "Ungültiger Status." }, { status: 400 });
@@ -589,7 +710,7 @@ export async function POST(request) {
                 ${Boolean(body.verified)}, ${body.validFrom || null}, ${body.source || null})
       `;
       await log(sql, personId, employee, "PERSON_ADDRESS_ADDED", body.source || null, {});
-      await synchronizePersonIntoRincen(sql, personId);
+      if (DEPARTMENT === "RINCEN") await synchronizePersonIntoRincen(sql, personId);
     } else if (action === "add_photo") {
       const data = String(body.imageDataUrl || "");
       if (!data.startsWith("data:image/") || data.length > 2_800_000) {
@@ -611,16 +732,51 @@ export async function POST(request) {
       await log(sql, personId, employee, "PERSON_PHOTO_ADDED",
         body.sourceRecord || "Photo upload", { photoType: body.photoType });
     } else if (action === "add_relationship") {
+      const relatedPersonId = String(body.relatedPersonId || "").trim().toUpperCase();
+      if (!relatedPersonId || relatedPersonId === personId) {
+        return NextResponse.json({ error: "Ungültige verbundene Person-ID." }, { status: 400 });
+      }
+
+      const target = await sql`
+        SELECT public_id
+        FROM county_people
+        WHERE public_id = ${relatedPersonId}
+      `;
+      if (!target.length) {
+        return NextResponse.json({ error: "Die verbundene Person wurde nicht gefunden." }, { status: 404 });
+      }
+
+      const pairIdRows = await sql`SELECT gen_random_uuid() AS id`;
+      const pairId = pairIdRows[0].id;
+      const directType = String(body.relationshipType || "related_person").trim();
+      const inverseType = String(body.inverseRelationshipType || inverseRelationshipType(directType)).trim();
+
       await sql`
         INSERT INTO county_person_relationships
-          (person_id, related_person_id, relationship_type, verified,
-           confidence, source, effective_from)
-        VALUES (${personId}, ${body.relatedPersonId}, ${body.relationshipType},
-                ${Boolean(body.verified)}, ${body.confidence || "reported"},
-                ${body.source || null}, ${body.effectiveFrom || null})
+          (person_id, related_person_id, relationship_type, relationship_pair_id,
+           verified, confidence, source, effective_from, effective_to)
+        VALUES
+          (${personId}, ${relatedPersonId}, ${directType}, ${pairId},
+           ${Boolean(body.verified)}, ${body.confidence || "reported"},
+           ${body.source || null}, ${body.effectiveFrom || null}, ${body.effectiveTo || null}),
+          (${relatedPersonId}, ${personId}, ${inverseType}, ${pairId},
+           ${Boolean(body.verified)}, ${body.confidence || "reported"},
+           ${body.source || null}, ${body.effectiveFrom || null}, ${body.effectiveTo || null})
       `;
+
       await log(sql, personId, employee, "PERSON_RELATIONSHIP_ADDED",
-        body.source || null, { relatedPersonId: body.relatedPersonId });
+        body.source || null, {
+          relatedPersonId,
+          relationshipType: directType,
+          inverseRelationshipType: inverseType,
+          relationshipPairId: pairId
+        });
+      await log(sql, relatedPersonId, employee, "PERSON_RELATIONSHIP_RECIPROCAL_ADDED",
+        body.source || null, {
+          relatedPersonId: personId,
+          relationshipType: inverseType,
+          relationshipPairId: pairId
+        });
     } else if (action === "add_role") {
       await sql`
         INSERT INTO county_person_roles
@@ -680,6 +836,151 @@ export async function POST(request) {
         body.purpose || "Record unlinking", {
           recordType: body.recordType, recordId: body.recordId
         });
+    } else if (action === "update_alias") {
+      const rows=await sql`SELECT * FROM county_person_aliases WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      if(!rows.length)return NextResponse.json({error:"Alias nicht gefunden."},{status:404});
+      await sql`UPDATE county_person_aliases SET first_name=${body.firstName||null},middle_name=${body.middleName||null},
+        last_name=${body.lastName},alias_type=${body.aliasType||"alias"},verified=${Boolean(body.verified)},
+        source=${body.source||null} WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      await auditRevision(sql,personId,employee,"PERSON_ALIAS_REVISED",body.reason,rows[0],body);
+    } else if (action === "delete_alias") {
+      const rows=await sql`DELETE FROM county_person_aliases WHERE id=${Number(body.id)} AND person_id=${personId} RETURNING *`;
+      if(!rows.length)return NextResponse.json({error:"Alias nicht gefunden."},{status:404});
+      await auditRevision(sql,personId,employee,"PERSON_ALIAS_REMOVED",body.reason,rows[0]);
+    } else if (action === "update_address") {
+      const rows=await sql`SELECT * FROM county_person_addresses WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      if(!rows.length)return NextResponse.json({error:"Adresse nicht gefunden."},{status:404});
+      if(body.isCurrent)await sql`UPDATE county_person_addresses SET is_current=FALSE,valid_to=COALESCE(valid_to,CURRENT_DATE)
+        WHERE person_id=${personId} AND id<>${Number(body.id)} AND is_current=TRUE`;
+      await sql`UPDATE county_person_addresses SET line1=${body.line1},line2=${body.line2||null},
+        city=${body.city},state_code=${body.stateCode||"CA"},postal_code=${body.postalCode||null},
+        address_type=${body.addressType||"residential"},is_current=${Boolean(body.isCurrent)},
+        verified=${Boolean(body.verified)},valid_from=${body.validFrom||null},
+        valid_to=${body.isCurrent?null:(body.validTo||null)},source=${body.source||null}
+        WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      await auditRevision(sql,personId,employee,"PERSON_ADDRESS_REVISED",body.reason,rows[0],body);
+      await synchronizePersonIntoRincen(sql,personId);
+    } else if (action === "delete_address") {
+      const rows=await sql`DELETE FROM county_person_addresses WHERE id=${Number(body.id)} AND person_id=${personId} RETURNING *`;
+      if(!rows.length)return NextResponse.json({error:"Adresse nicht gefunden."},{status:404});
+      await auditRevision(sql,personId,employee,"PERSON_ADDRESS_REMOVED",body.reason,rows[0]);
+      await synchronizePersonIntoRincen(sql,personId);
+    } else if (action === "update_role") {
+      const rows=await sql`SELECT * FROM county_person_roles WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      if(!rows.length)return NextResponse.json({error:"Rolle nicht gefunden."},{status:404});
+      await sql`UPDATE county_person_roles SET role_type=${body.roleType},organization=${body.organization},
+        title_or_rank=${body.titleOrRank||null},badge_number=${body.badgeNumber||null},
+        employee_number=${body.employeeNumber||null},jurisdiction=${body.jurisdiction||null},
+        political_party=${body.politicalParty||null},starts_at=${body.startsAt||null},ends_at=${body.endsAt||null},
+        status=${body.status||"active"},source=${body.source||null}
+        WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      await auditRevision(sql,personId,employee,"PERSON_ROLE_REVISED",body.reason,rows[0],body);
+    } else if (action === "delete_role") {
+      const rows=await sql`DELETE FROM county_person_roles WHERE id=${Number(body.id)} AND person_id=${personId} RETURNING *`;
+      if(!rows.length)return NextResponse.json({error:"Rolle nicht gefunden."},{status:404});
+      await auditRevision(sql,personId,employee,"PERSON_ROLE_REMOVED",body.reason,rows[0]);
+    } else if (action === "update_relationship") {
+      const pair = await loadRelationshipPair(sql, personId, body.id);
+      if (!pair) return NextResponse.json({ error: "Beziehung nicht gefunden." }, { status: 404 });
+
+      const relatedPersonId = String(body.relatedPersonId || pair.current.related_person_id).trim().toUpperCase();
+      if (relatedPersonId !== pair.current.related_person_id) {
+        return NextResponse.json({
+          error: "Die verbundene Person kann nicht innerhalb einer Revision ausgetauscht werden. Entfernen Sie die Beziehung und legen Sie sie neu an."
+        }, { status: 400 });
+      }
+
+      const directType = String(body.relationshipType || pair.current.relationship_type).trim();
+      const inverseType = String(
+        body.inverseRelationshipType ||
+        pair.counterpart?.relationship_type ||
+        inverseRelationshipType(directType)
+      ).trim();
+
+      await sql`
+        UPDATE county_person_relationships
+        SET relationship_type = ${directType},
+            verified = ${Boolean(body.verified)},
+            confidence = ${body.confidence || "reported"},
+            source = ${body.source || null},
+            effective_from = ${body.effectiveFrom || null},
+            effective_to = ${body.effectiveTo || null}
+        WHERE id = ${pair.current.id}
+      `;
+
+      if (pair.counterpart) {
+        await sql`
+          UPDATE county_person_relationships
+          SET relationship_type = ${inverseType},
+              verified = ${Boolean(body.verified)},
+              confidence = ${body.confidence || "reported"},
+              source = ${body.source || null},
+              effective_from = ${body.effectiveFrom || null},
+              effective_to = ${body.effectiveTo || null}
+          WHERE id = ${pair.counterpart.id}
+        `;
+      }
+
+      await auditRevision(sql, personId, employee, "PERSON_RELATIONSHIP_REVISED",
+        body.reason, pair.current, {
+          ...body,
+          relationshipType: directType,
+          inverseRelationshipType: inverseType
+        });
+
+      if (pair.counterpart) {
+        await auditRevision(sql, pair.counterpart.person_id, employee,
+          "PERSON_RELATIONSHIP_RECIPROCAL_REVISED",
+          body.reason, pair.counterpart, {
+            relationshipType: inverseType,
+            relatedPersonId: personId
+          });
+      }
+    } else if (action === "delete_relationship") {
+      const pair = await loadRelationshipPair(sql, personId, body.id);
+      if (!pair) return NextResponse.json({ error: "Beziehung nicht gefunden." }, { status: 404 });
+
+      if (pair.current.relationship_pair_id) {
+        await sql`
+          DELETE FROM county_person_relationships
+          WHERE relationship_pair_id = ${pair.current.relationship_pair_id}
+        `;
+      } else {
+        await sql`
+          DELETE FROM county_person_relationships
+          WHERE id = ${pair.current.id}
+        `;
+      }
+
+      await auditRevision(sql, personId, employee, "PERSON_RELATIONSHIP_REMOVED",
+        body.reason, pair.current);
+
+      if (pair.counterpart) {
+        await auditRevision(sql, pair.counterpart.person_id, employee,
+          "PERSON_RELATIONSHIP_RECIPROCAL_REMOVED",
+          body.reason, pair.counterpart);
+      }
+    } else if (action === "update_event") {
+      const rows=await sql`SELECT * FROM county_person_events WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      if(!rows.length)return NextResponse.json({error:"Ereignis nicht gefunden."},{status:404});
+      await sql`UPDATE county_person_events SET event_category=${body.eventCategory},
+        event_status=${body.eventStatus||null},title=${body.title},occurred_at=${body.occurredAt||null},
+        ended_at=${body.endedAt||null},source_record=${body.sourceRecord||null},
+        summary=${body.summary||null},disposition=${body.disposition||null},restricted=${Boolean(body.restricted)}
+        WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      await auditRevision(sql,personId,employee,"PERSON_EVENT_REVISED",body.reason,rows[0],body);
+    } else if (action === "void_event") {
+      const rows=await sql`SELECT * FROM county_person_events WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      if(!rows.length)return NextResponse.json({error:"Ereignis nicht gefunden."},{status:404});
+      await sql`UPDATE county_person_events SET event_status='voided',
+        summary=COALESCE(summary,'')||${`\n[VOIDED] ${body.reason||"No reason supplied"}`}
+        WHERE id=${Number(body.id)} AND person_id=${personId}`;
+      await auditRevision(sql,personId,employee,"PERSON_EVENT_VOIDED",body.reason,rows[0],{event_status:"voided"});
+    } else if (action === "delete_photo") {
+      const rows=await sql`DELETE FROM county_person_photos WHERE id=${Number(body.id)} AND person_id=${personId}
+        RETURNING id,photo_type,source_department,source_record,created_at`;
+      if(!rows.length)return NextResponse.json({error:"Foto nicht gefunden."},{status:404});
+      await auditRevision(sql,personId,employee,"PERSON_PHOTO_REMOVED",body.reason,rows[0]);
     } else {
       return NextResponse.json({ error: "Unbekannte Personregister-Aktion." }, { status: 400 });
     }

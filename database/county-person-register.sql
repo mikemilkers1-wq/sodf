@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS county_person_relationships (
   person_id TEXT NOT NULL REFERENCES county_people(public_id) ON DELETE CASCADE,
   related_person_id TEXT NOT NULL REFERENCES county_people(public_id) ON DELETE CASCADE,
   relationship_type TEXT NOT NULL,
+  relationship_pair_id UUID,
   verified BOOLEAN NOT NULL DEFAULT FALSE,
   confidence TEXT NOT NULL DEFAULT 'reported',
   source TEXT,
@@ -177,3 +178,6 @@ CREATE TABLE IF NOT EXISTS county_person_audit (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS county_person_audit_person_idx ON county_person_audit(person_id);
+
+CREATE INDEX IF NOT EXISTS county_person_relationship_pair_idx
+  ON county_person_relationships(relationship_pair_id);
