@@ -378,11 +378,41 @@ function PersonRegister({employee}){
   }
   async function uploadPhoto(e){const file=e.target.files?.[0];if(!file)return;if(file.size>2_000_000)return setMessage("Foto zu groß.");const reader=new FileReader();reader.onload=()=>act({action:"add_photo",personId:person.public_id,photoType:"mugshot",imageDataUrl:reader.result,sourceRecord:"RCSO upload",isPrimary:true});reader.readAsDataURL(file)}
 
+
+  function createPersonModal(){
+    setModal({
+      title:"Neue Person erfassen",
+      submitLabel:"Person anlegen",
+      body:<div className="person-form-grid">
+        <TextField label="Vorname" name="legalFirstName" required/>
+        <TextField label="Zweiter Vorname" name="legalMiddleName"/>
+        <TextField label="Nachname" name="legalLastName" required/>
+        <TextField label="Geburtsdatum" name="dateOfBirth" type="date"/>
+        <SelectField label="Geschlecht" name="sex" defaultValue="" options={["","Male","Female","Unknown"]}/>
+        <TextField label="Telefon" name="primaryPhone"/>
+        <TextField label="E-Mail" name="primaryEmail" type="email"/>
+        <TextField label="Erfassungsgrund" name="creationReason" required/>
+        <TextField label="Quellvorgang" name="sourceRecord"/>
+        <label className="span-2">Allgemeine Notiz<textarea name="generalNotes"/></label>
+      </div>,
+      onSubmit:async f=>{
+        const result=await request({action:"create_person",...Object.fromEntries(f)});
+        if(result.person){
+          setPerson(result.person);
+          setModal(null);
+          setMessage(`${result.person.public_id} wurde angelegt.`);
+        }
+      }
+    });
+  }
+
   return <div className="person-register-layout">
     <PersonModal config={modal} onClose={()=>setModal(null)}/>
     <section className="panel person-search-panel"><div className="panel-header">PERSONREGISTER</div>
       <div className="person-search-row"><input value={query} onChange={e=>{setQuery(e.target.value);clearTimeout(window.__rcsoPersonTimer);window.__rcsoPersonTimer=setTimeout(()=>search(e.target.value),250)}} placeholder="Name, Adresse oder Person-ID"/><button onClick={()=>search()}>Suchen</button></div>
-      <div className="person-result-list">{people.map(p=><button key={p.public_id} onClick={()=>open(p.public_id)}><strong>{p.public_id}</strong><span>{p.legal_first_name} {p.legal_last_name}</span><small>{p.current_address||"Keine aktuelle Adresse"}</small></button>)}</div><div className="message">{message}</div>
+      <div className="person-result-list">{people.map(p=><button key={p.public_id} onClick={()=>open(p.public_id)}><strong>{p.public_id}</strong><span>{p.legal_first_name} {p.legal_last_name}</span><small>{p.current_address||"Keine aktuelle Adresse"}</small></button>)}</div>
+      <button className="person-create-button" onClick={createPersonModal}>Neue Person erfassen</button>
+      <div className="message">{message}</div>
     </section>
     <section className="panel person-profile-panel"><div className="panel-header">PERSONENPROFIL</div>
       {!person?<p>Person auswählen.</p>:<div className="person-profile">
@@ -395,7 +425,7 @@ function PersonRegister({employee}){
         <section><h3>Relationships</h3>{person.relationships?.map(r=><div className="person-data-row" key={r.id}><span>{r.relationship_type}: {r.related_first_name} {r.related_last_name} ({r.related_person_id})</span><span><button onClick={()=>relationModal(r)}>Edit</button><button className="danger" onClick={()=>removeModal("relationship",r.id)}>Remove</button></span></div>)}</section>
         <section><h3>Law-Enforcement / Custody History</h3>{person.events?.map(ev=><div className="person-data-row person-event" key={ev.id}><div><strong>{ev.event_category}: {ev.title}</strong><span>{ev.event_status||""} • {ev.department}</span><p>{ev.summary||"—"}</p></div><span><button onClick={()=>eventModal(ev)}>Revise</button><button className="danger" onClick={()=>removeModal("event",ev.id)}>Void</button></span></div>)}</section>
         <section><h3>Photos</h3><div className="person-photo-grid">{person.photos?.map(ph=><figure key={ph.id}><img src={ph.image_data_url}/><figcaption>{ph.photo_type}</figcaption><button className="danger" onClick={()=>removeModal("photo",ph.id)}>Remove</button></figure>)}</div></section>
-        <div className="person-profile-actions"><button onClick={coreModal}>Stammdaten bearbeiten</button><button onClick={()=>addressModal()}>Adresse hinzufügen</button><button onClick={()=>roleModal()}>LEO / Behördenrolle hinzufügen</button><button onClick={()=>relationModal()}>Beziehung hinzufügen</button><button onClick={()=>aliasModal()}>Alias hinzufügen</button><button onClick={()=>eventModal()}>Ereignis hinzufügen</button><label>Foto / Mugshot<input type="file" accept="image/*" onChange={uploadPhoto}/></label><button onClick={()=>downloadPersonPdf(person)}>PDF herunterladen</button></div>
+        <div className="person-profile-actions"><button onClick={coreModal}>Stammdaten bearbeiten</button><button onClick={()=>addressModal()}>Adresse hinzufügen</button><button onClick={()=>roleModal()}>LEO / Behördenrolle hinzufügen</button><button onClick={()=>relationModal()}>Beziehung hinzufügen</button><button onClick={()=>aliasModal()}>Alias hinzufügen</button><button onClick={()=>eventModal()}>Ereignis hinzufügen</button><label>Foto / Mugshot<input type="file" accept="image/*" onChange={uploadPhoto}/></label><button onClick={()=>downloadPersonPdf(person)}>Personenprofil als PDF herunterladen</button></div>
       </div>}
     </section>
   </div>

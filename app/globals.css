@@ -60,3 +60,18 @@ table{width:100%;border-collapse:collapse;color:var(--ink)}th,td{border:1px soli
 .person-data-row{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #c9b892}.person-data-row>span:last-child{display:flex;gap:4px}
 .person-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}.person-photo-grid figure{margin:0;border:1px solid #a58d67;padding:5px}.person-photo-grid img{width:100%;height:140px;object-fit:cover}
 @media(max-width:700px){.person-form-grid{grid-template-columns:1fr}.person-form-grid .span-2{grid-column:auto}.person-data-row{display:block}}
+
+
+/* Sheriff v0.3.7 — restore new person button */
+.person-create-button {
+  width: calc(100% - 12px);
+  margin: 6px;
+  padding: 8px 10px;
+  border: 1px solid #6d4a1d;
+  background: linear-gradient(#e4c277, #c79b3d);
+  color: #2f1d0d;
+  font-weight: 700;
+}
+.person-create-button:hover {
+  filter: brightness(1.04);
+}
