@@ -96,7 +96,7 @@ export default function Portal(){
     </form>
   </main>;
 
-  const tabs=[["home","⌂","Homepage"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
+  const tabs=[["home","⌂","Homepage"],["people","◉","Personregister"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
 
   return <main className="terminal">
     <header className="terminal-header"><div className="brand"><img src="/rcso-logo.png" alt=""/><div><strong>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</strong><small>INTERNAL RECORDS TERMINAL</small></div></div>
@@ -106,10 +106,10 @@ export default function Portal(){
     {message&&<div className="status-message">{message}</div>}
     <section className="workspace">
       {search.trim()?<SearchResults filtered={filtered} setTab={setTab} setSelected={setSelected} setSearch={setSearch}/>:<>
-        {tab==="home"&&<Home state={state} employee={employee} setTab={setTab}/>}
+        {tab==="home"&&<Home state={state} employee={employee} setTab={setTab}/>}        {tab==="people"&&<PersonRegister employee={employee}/>}
         {tab==="employees"&&<EmployeeDirectory employee={employee}/>}
         {tab==="bolos"&&<RecordModule employee={employee} title="BOLOs" kind="bolos" records={state.bolos} selected={selected} setSelected={setSelected} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} prefix="RCSO-BOLO" fields={[
-          ["boloType","BOLO-Typ","select",["Individual","Vehicle","Property / Object","Unknown Subject"]],
+          ["boloType","BOLO-Typ","select",["Individual","Vehicle","Property / Object","Unknown Subject"]],          ["personId","Verknüpfte Person","person"],
           ["subject","Person, Fahrzeug oder Gegenstand","text"],["reason","Grund / Gefahrenhinweis","text"],
           ["status","Status","select",["Active","Located","Closed","Cancelled"]],["officer","Ausstellender Beamter","text"]
         ]}/>}
@@ -163,12 +163,37 @@ function EmployeeDirectory({employee}){
 }
 
 function Field({name,label,type="text",options=[]}){
-  return type==="select"?<label>{label}<select name={name}>{options.map(x=><option key={x}>{x}</option>)}</select></label>:<label>{label}<input name={name} required/></label>
+  if(type==="select")return <label>{label}<select name={name}>{options.map(x=><option key={x}>{x}</option>)}</select></label>;
+  if(type==="person")return <PersonPicker name={name} label={label}/>;
+  return <label>{label}<input name={name} required/></label>
+}
+
+function PersonPicker({name,label}){
+  const [q,setQ]=useState(""),[results,setResults]=useState([]),[selected,setSelected]=useState(null);
+  useEffect(()=>{if(q.trim().length<2){setResults([]);return}const t=setTimeout(async()=>{
+    const r=await fetch(`/api/person-register?q=${encodeURIComponent(q)}&purpose=Department record linking`,{cache:"no-store"});
+    const p=await r.json().catch(()=>({}));setResults(p.people||[]);
+  },250);return()=>clearTimeout(t)},[q]);
+  return <label className="person-picker">{label}
+    <input value={selected?`${selected.public_id} — ${selected.legal_first_name} ${selected.legal_last_name}`:q}
+      onChange={e=>{setSelected(null);setQ(e.target.value)}} placeholder="Name, Adresse oder Person-ID suchen"/>
+    <input type="hidden" name={name} value={selected?.public_id||""}/>
+    {!selected&&results.length>0&&<div className="person-picker-results">{results.map(p=><button type="button" key={p.public_id}
+      onClick={()=>{setSelected(p);setQ("")}}><strong>{p.public_id}</strong><span>{p.legal_first_name} {p.legal_last_name}</span><small>{p.current_address||"Keine aktuelle Adresse"}</small></button>)}</div>}
+  </label>
 }
 
 function RecordModule({employee,title,kind,records,selected,setSelected,addRecord,updateRecord,removeRecord,prefix,fields}){
   const current=records.find(x=>x.id===selected), mayCreate=can(employee,"create",kind), mayEdit=can(employee,"edit",kind), mayDelete=can(employee,"delete",kind);
-  function submit(e){e.preventDefault();const f=new FormData(e.currentTarget);const record={id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName};for(const [key] of fields)record[key]=f.get(key);record.notes=f.get("notes");addRecord(kind,record);e.currentTarget.reset()}
+  function submit(e){e.preventDefault();const f=new FormData(e.currentTarget);const record={id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName};for(const [key] of fields)record[key]=f.get(key);record.notes=f.get("notes");addRecord(kind,record);
+    if(record.personId){
+      fetch("/api/person-register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        action:"link_record",personId:record.personId,department:"RCSO",recordType:kind==="bolos"?"BOLO":kind,
+        recordId:record.id,recordStatus:record.status||null,summary:record.reason||record.title||record.offense||null,
+        occurredAt:record.createdAt,purpose:"Sheriff record association"
+      })}).catch(console.error);
+    }
+    e.currentTarget.reset()}
   return <div className="record-layout">
     <section className="panel list-panel"><div className="panel-header">{title.toUpperCase()}</div>
       {mayCreate?<form className="record-form" onSubmit={submit}>{fields.map(([k,l,t,o])=><Field key={k} name={k} label={l} type={t} options={o}/>)}<label>Notizen<textarea name="notes" rows="3"/></label><button type="submit">＋ Datensatz anlegen</button></form>:<div className="permission-note">Ihre Rolle darf hier keine neuen Datensätze anlegen.</div>}
@@ -193,4 +218,75 @@ function Admin({employee}){
     <label>Rang / Rolle<select name="role"><option value="deputy">Deputy</option><option value="supervisor">Supervisor</option><option value="dispatcher">Dispatcher</option><option value="read_only">Nur Lesen</option><option value="sheriff_admin">Sheriff Administrator</option></select></label>
     <button type="submit">Mitarbeiterkonto anlegen</button></form><p>{message}</p><button className="lock-button" onClick={lock}>Admin-Menü sperren</button></section>
     <section className="panel"><div className="panel-header">MITARBEITERKONTEN</div><table><thead><tr><th>Kennung</th><th>Name</th><th>Rang / Rolle</th><th>Status</th></tr></thead><tbody>{employees.map(e=><tr key={e.id}><td>{e.employee_key}</td><td>{e.display_name}</td><td>{roleLabels[e.role]}</td><td>{e.status}</td></tr>)}</tbody></table></section></div>
+}
+
+
+function PersonRegister({employee}){
+  const [query,setQuery]=useState(""),[people,setPeople]=useState([]),[person,setPerson]=useState(null),[message,setMessage]=useState("");
+
+  async function search(value=query){
+    if(value.trim().length<2)return setPeople([]);
+    const r=await fetch(`/api/person-register?q=${encodeURIComponent(value)}&purpose=Law enforcement person inquiry`,{cache:"no-store"});
+    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Suche fehlgeschlagen.");setPeople(p.people||[]);
+  }
+  async function open(id){
+    const r=await fetch(`/api/person-register?id=${encodeURIComponent(id)}&purpose=Law enforcement profile review`,{cache:"no-store"});
+    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Profil konnte nicht geladen werden.");setPerson(p.person);
+  }
+  async function action(payload){
+    const r=await fetch("/api/person-register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Aktion fehlgeschlagen.");setPerson(p.person);setMessage("Personregister aktualisiert.");
+  }
+  function create(e){
+    e.preventDefault();const f=new FormData(e.currentTarget);
+    action({action:"create_person",legalFirstName:f.get("first"),legalMiddleName:f.get("middle"),legalLastName:f.get("last"),
+      dateOfBirth:f.get("dob"),sex:f.get("sex"),creationReason:f.get("reason"),sourceRecord:f.get("source"),generalNotes:f.get("notes")})
+      .then(()=>e.currentTarget.reset());
+  }
+  function uploadPhoto(e){
+    const file=e.target.files?.[0];if(!file)return;if(file.size>2_000_000)return setMessage("Das Foto darf höchstens ungefähr 2 MB groß sein.");
+    const reader=new FileReader();reader.onload=()=>action({action:"add_photo",personId:person.public_id,photoType:"mugshot",
+      imageDataUrl:reader.result,sourceRecord:"Manual RCSO upload",isPrimary:true});reader.readAsDataURL(file);
+  }
+
+  return <div className="person-register-layout">
+    <section className="panel person-search-panel"><div className="panel-header">PERSONREGISTER</div>
+      <div className="person-search-row"><input value={query} onChange={e=>{setQuery(e.target.value);search(e.target.value)}} placeholder="Name, Alias, Adresse, Person-ID oder Badge-Nr."/><button onClick={()=>search()}>Suchen</button></div>
+      <div className="person-result-list">{people.map(p=><button key={p.public_id} onClick={()=>open(p.public_id)}>
+        {p.primary_photo?<img src={p.primary_photo} alt=""/>:<span className="person-placeholder">◉</span>}
+        <strong>{p.legal_first_name} {p.legal_middle_name||""} {p.legal_last_name}</strong>
+        <small>{p.public_id} • DOB {p.date_of_birth||"—"} • {p.status}</small><small>{p.current_address||"Keine aktuelle Adresse"}</small>
+      </button>)}</div>
+      <details className="create-person-box"><summary>Neue Person erfassen</summary><form onSubmit={create}>
+        <label>Vorname<input name="first" required/></label><label>Zweiter Vorname<input name="middle"/></label>
+        <label>Nachname<input name="last" required/></label><label>Geburtsdatum<input name="dob" type="date"/></label>
+        <label>Geschlecht<select name="sex"><option value="">—</option><option>Male</option><option>Female</option><option>Unknown</option></select></label>
+        <label>Erfassungsgrund<input name="reason" required placeholder="Arrest, questioning, citation …"/></label>
+        <label>Quellvorgang<input name="source" placeholder="RCSO-ARR-..."/></label><label>Notizen<textarea name="notes"/></label>
+        <button type="submit">Person-ID anlegen</button></form></details>
+      <div className="message">{message}</div>
+    </section>
+    <section className="panel person-profile-panel"><div className="panel-header">PERSONENPROFIL</div>
+      {!person?<p>Person auswählen.</p>:<div className="person-profile">
+        <header>{person.photos?.[0]?<img src={person.photos[0].image_data_url} alt="Person"/>:<div className="profile-photo-placeholder">NO PHOTO</div>}
+          <div><h2>{person.legal_first_name} {person.legal_middle_name||""} {person.legal_last_name}</h2>
+          <strong>{person.public_id}</strong><p>Status: {person.status}</p></div></header>
+        <div className="profile-grid"><section><h3>Core Identity</h3><p>DOB: {person.date_of_birth||"—"}</p><p>Sex: {person.sex||"—"}</p>
+          <p>Height: {person.height_cm||"—"} cm</p><p>Weight: {person.weight_kg||"—"} kg</p><p>Eyes: {person.eye_color||"—"}</p><p>Hair: {person.hair_color||"—"}</p>
+          <p>SSN: {person.ssn_masked||"—"}</p><p>Driver License: {person.driver_license_masked||"—"}</p></section>
+          <section><h3>Addresses</h3>{person.addresses?.map(a=><p key={a.id}>{a.line1}, {a.city}, {a.state_code} {a.postal_code||""} {a.is_current?"(current)":""}</p>)||null}</section>
+          <section><h3>Aliases</h3>{person.aliases?.map(a=><p key={a.id}>{a.first_name||""} {a.middle_name||""} {a.last_name}</p>)||null}</section>
+          <section><h3>Government / LEO Roles</h3>{person.roles?.map(r=><p key={r.id}>{r.organization} — {r.title_or_rank||r.role_type} {r.badge_number?`Badge ${r.badge_number}`:""}</p>)||null}</section>
+        </div>
+        <section><h3>Department Links</h3><table><thead><tr><th>Department</th><th>Type</th><th>Record</th><th>Status</th><th>Summary</th><th>Amount</th></tr></thead>
+          <tbody>{person.links?.map(l=><tr key={l.id}><td>{l.department}</td><td>{l.record_type}</td><td>{l.record_id}</td><td>{l.record_status||"—"}</td><td>{l.summary||"—"}</td><td>{l.amount==null?"—":`$${Number(l.amount).toFixed(2)}`}</td></tr>)}</tbody></table></section>
+        <section><h3>Law-Enforcement / Custody History</h3>{person.events?.map(ev=><article className="person-event" key={ev.id}><strong>{ev.event_category}: {ev.title}</strong><span>{ev.event_status||""} • {ev.occurred_at?fmt(ev.occurred_at):"Unknown date"} • {ev.department}</span><p>{ev.summary||"—"}</p></article>)}</section>
+        <section><h3>Relationships</h3>{person.relationships?.map(r=><p key={r.id}>{r.relationship_type}: {r.related_first_name} {r.related_last_name} ({r.related_person_id})</p>)}</section>
+        <div className="person-profile-actions"><label>Mugshot / Foto hinzufügen<input type="file" accept="image/*" onChange={uploadPhoto}/></label>
+          <button onClick={()=>{const last=prompt("Alias-Nachname");if(last)action({action:"add_alias",personId:person.public_id,lastName:last,source:"RCSO profile update"})}}>Alias hinzufügen</button>
+          <button onClick={()=>{const title=prompt("Ereignisbezeichnung");if(title)action({action:"add_event",personId:person.public_id,eventCategory:"other",title,department:"RCSO",summary:prompt("Zusammenfassung")||""})}}>Ereignis hinzufügen</button>
+          <button onClick={()=>window.print()}>Personenprofil exportieren / drucken</button></div>
+      </div>}
+    </section>
+  </div>
 }
