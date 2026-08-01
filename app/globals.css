@@ -1,0 +1,56 @@
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#b8b8b2;color:#111;font-family:Tahoma,Arial,sans-serif;font-size:12px}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+.login-screen{height:100vh;background:#07192a;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.seal{width:92px;height:92px;border-radius:50%;border:5px double #fff;display:grid;place-items:center;background:#1d4d78;font:700 23px Georgia,serif;letter-spacing:2px}
+.login-screen h1{font:700 26px Georgia,serif;letter-spacing:4px;margin:18px 0 4px}
+.subtitle{letter-spacing:4px;color:#7fc1ff}
+.login-panel{width:410px;background:#efeee9;color:#111;border:1px solid #82909d;padding:14px;display:grid;gap:10px}
+.panel-header{background:linear-gradient(#244f78,#0d2d49);color:#fff;font:700 12px Georgia,serif;letter-spacing:1px;padding:7px 9px}
+.login-panel label,.record-form label{display:grid;gap:4px;font-weight:700}
+input,textarea,select{border:1px solid #8c8c88;background:#fff;padding:6px}
+.login-panel button,.record-form button,.detail-actions button,.user-box button{border:1px outset #999;background:linear-gradient(#fff,#d3d2cc);padding:7px 12px;font-weight:700}
+.message{min-height:18px;color:#9c220f}
+.terminal{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.terminal-header{flex:0 0 56px;background:#0b2238;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid #45637f}
+.terminal-header strong{font:700 18px Georgia,serif;letter-spacing:2px}
+.terminal-header small{display:block;color:#85bcea;letter-spacing:2px;margin-top:4px}
+.user-box{display:flex;gap:12px;align-items:center}
+.tabs{display:flex;flex:0 0 32px;background:#102b45;border-bottom:1px solid #00111f;overflow-x:auto}
+.tabs button{border:0;border-right:1px solid #5e7488;background:linear-gradient(#214b70,#0e2d49);color:#fff;padding:0 15px;font-weight:700}
+.tabs button span{margin-right:6px}
+.tabs button.active{background:#e8e6de;color:#08233b}
+.system-strip{flex:0 0 30px;display:flex;align-items:center;gap:22px;padding:0 12px;background:#e7e6df;border-bottom:1px solid #8a8a86}
+.global-search{margin-left:auto;display:flex;align-items:center;gap:4px}
+.global-search input{width:280px;padding:3px 6px}
+.ready{color:#276e20;font-weight:700}
+.status-message{position:absolute;right:12px;top:122px;background:#fff2b7;border:1px solid #9c8424;padding:6px 10px;z-index:20}
+.workspace{flex:1;min-height:0;overflow:auto;padding:10px}
+.panel{border:1px solid #727b82;background:#efeee9;min-height:0}
+.panel>p,.panel>table,.panel>.record-detail{margin:10px}
+.home-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:12px;height:100%}
+.welcome-panel{background:#efeee9;border:1px solid #727b82}
+.welcome-panel h2,.welcome-panel p{margin:14px}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stats-grid button{border:1px solid #70777d;background:linear-gradient(#fff,#d7d6d0);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.stats-grid strong{font:700 34px Georgia,serif;color:#123c61}
+.stats-grid span{font-weight:700;margin-top:7px}
+.record-layout{display:grid;grid-template-columns:430px 1fr;gap:10px;height:100%}
+.list-panel,.detail-panel{display:flex;flex-direction:column;min-height:0}
+.record-form{display:grid;gap:7px;padding:9px;border-bottom:1px solid #9e9e98}
+.record-list{overflow:auto;min-height:0;padding:6px}
+.record-list button{width:100%;display:grid;grid-template-columns:130px 1fr;text-align:left;border:0;border-bottom:1px solid #c3c2bd;background:transparent;padding:8px}
+.record-list button:hover,.record-list button.selected{background:#cfe2f3}
+.record-detail{overflow:auto}
+.record-detail h2{font-family:Georgia,serif;color:#173d60}
+.detail-actions{display:flex;gap:8px;margin-top:18px}
+.danger{color:#8c1111}
+table{width:100%;border-collapse:collapse}
+th,td{border:1px solid #b5b4af;padding:6px;text-align:left}
+th{background:#163a5c;color:#fff}
+.admin-layout{display:grid;grid-template-columns:430px 1fr;gap:10px}
+.search-results{border:1px solid #4f5962;background:#f2f1ec;max-height:100%;overflow:auto}
+.search-results>button{width:100%;border:0;border-bottom:1px solid #ccc;background:transparent;display:grid;grid-template-columns:190px 1fr;text-align:left;padding:8px}
+.search-results>button:hover{background:#d7e7f5}
+@media(max-width:900px){.record-layout,.admin-layout,.home-grid{grid-template-columns:1fr}.terminal-header strong{font-size:13px}.global-search input{width:150px}}
