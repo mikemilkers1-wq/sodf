@@ -240,11 +240,12 @@ export default function Portal(){
 
   const tabs=[["home","⌂","Homepage"],["people","◉","Personregister"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
 
-  return <main className="terminal">
-    <header className="terminal-header"><div className="brand"><img src="/rcso-logo.png" alt=""/><div><strong>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</strong><small>INTERNAL RECORDS TERMINAL</small></div></div>
-      <div className="user-box"><span>{employee.displayName} · {roleLabels[employee.role]}</span><button onClick={logout}>Abmelden</button></div></header>
+  return <main className="terminal modern-rcso-terminal">
+    <div className="les-banner"><strong>LAW ENFORCEMENT SENSITIVE</strong><span>RIVERSIDE COUNTY INTERNAL NETWORK</span></div>
+    <header className="terminal-header"><div className="brand"><img src="/rcso-logo.png" alt=""/><div><strong>Riverside County Sheriff&apos;s Office</strong><small>Law Enforcement Records Terminal</small></div></div>
+      <div className="user-box"><div><strong>{employee.displayName}</strong><small>{roleLabels[employee.role]}</small></div><button onClick={logout}>Abmelden</button></div></header>
     <nav className="tabs">{tabs.map(([id,symbol,label])=><button key={id} className={tab===id?"active":""} onClick={()=>{setTab(id);setSelected(null)}}><span>{symbol}</span>{label}</button>)}</nav>
-    <div className="system-strip"><span>RCSO-NET</span><span>Datenversion {version??"—"}</span><label className="global-search">⌕ <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Terminal durchsuchen"/></label><span className="ready">● SYSTEM READY</span></div>
+    <div className="system-strip"><span><strong>RCSO-NET</strong></span><span>Datenversion {version??"—"}</span><label className="global-search">Suche <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Person, Vorgang oder Aktenzeichen"/></label><span className="ready">● Verbindung verfügbar</span></div>
     {message&&<div className="status-message">{message}</div>}
     <section className="workspace">
       {search.trim()?<SearchResults filtered={filtered} setTab={setTab} setSelected={setSelected} setSearch={setSearch}/>:<>
@@ -270,6 +271,7 @@ export default function Portal(){
         {tab==="admin"&&<Admin employee={employee}/>}
       </>}
     </section>
+    <div className="les-banner les-banner-bottom"><strong>LAW ENFORCEMENT SENSITIVE</strong><span>AUTHORIZED PERSONNEL ONLY</span></div>
   </main>
 }
 
@@ -281,18 +283,42 @@ function SearchResults({filtered,setTab,setSelected,setSearch}){
 
 function Home({state,employee,setTab}){
   const recent=[...state.bolos.map(x=>({...x,module:"BOLO",tab:"bolos"})),...state.files.map(x=>({...x,module:"Akte",tab:"files"})),...state.arrests.map(x=>({...x,module:"Festnahme",tab:"arrests"})),...state.complaints.map(x=>({...x,module:"Strafanzeige",tab:"complaints"}))]
-    .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).slice(0,7);
-  return <div className="home-layout">
-    <section className="welcome-panel"><div className="panel-header">RCSO TERMINAL</div><div className="welcome-body"><h2>Willkommen, {employee.displayName}</h2>
-      <p>Dieses Terminal dient der internen Bearbeitung von Fahndungen, Akten, Festnahmen und Strafanzeigen des Riverside County Sheriff&apos;s Office.</p>
-      <div className="role-brief"><strong>{roleLabels[employee.role]}</strong><span>{roleDescriptions[employee.role]}</span></div></div></section>
-    <section className="panel recent-panel"><div className="panel-header">ZULETZT BEARBEITETE VORGÄNGE</div><div className="recent-list">
-      {recent.map(x=><button key={`${x.module}-${x.id}`} onClick={()=>setTab(x.tab)}><span>{x.module}</span><strong>{x.id}</strong><small>{x.subject||x.person||x.title||x.offense||"Datensatz"}</small></button>)}
-      {!recent.length&&<p>Noch keine Vorgänge vorhanden.</p>}</div></section>
-    <section className="quick-actions">
-      <button onClick={()=>setTab("bolos")}><strong>{state.bolos.filter(x=>x.status==="Active").length}</strong><span>Aktive BOLOs</span></button>
-      <button onClick={()=>setTab("files")}><strong>{state.files.filter(x=>!["Closed","Archived"].includes(x.status)).length}</strong><span>Offene Akten</span></button>
-      <button onClick={()=>setTab("complaints")}><strong>{state.complaints.filter(x=>x.status!=="Closed").length}</strong><span>Offene Strafanzeigen</span></button>
+    .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).slice(0,6);
+
+  return <div className="home-layout modern-home-layout">
+    <section className="welcome-panel modern-welcome">
+      <div className="panel-header">MITARBEITERÜBERSICHT</div>
+      <div className="welcome-body">
+        <p className="welcome-kicker">RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</p>
+        <h2>Willkommen, {employee.displayName}.</h2>
+        <p>Dieses Terminal dient der dienstlichen Bearbeitung von Fahndungen, Akten, Festnahmen, Strafanzeigen und behördenübergreifenden Personenverknüpfungen.</p>
+        <p><strong>Aktuelle Funktion:</strong> {roleLabels[employee.role]}</p>
+        <p>{roleDescriptions[employee.role]}</p>
+      </div>
+    </section>
+
+    <section className="panel operational-guidance">
+      <div className="panel-header">HINWEISE FÜR DIESE SITZUNG</div>
+      <div className="guidance-list">
+        <div><strong>Dokumentation</strong><span>Wesentliche Feststellungen und Änderungen sind sachlich und nachvollziehbar zu erfassen.</span></div>
+        <div><strong>Personregister</strong><span>Verknüpfungen dürfen nur nach eindeutiger Identifizierung der betroffenen Person vorgenommen werden.</span></div>
+        <div><strong>Datenschutz</strong><span>Informationen dürfen ausschließlich im Rahmen des dienstlichen Auftrags verwendet werden.</span></div>
+        <div><strong>Freigaben</strong><span>Administrativer Zugriff und Mitarbeiterverwaltung bleiben autorisierten Führungsrollen vorbehalten.</span></div>
+      </div>
+    </section>
+
+    <section className="panel recent-panel">
+      <div className="panel-header">ZULETZT BEARBEITETE VORGÄNGE</div>
+      <div className="recent-list">
+        {recent.map(x=><button key={`${x.module}-${x.id}`} onClick={()=>setTab(x.tab)}><span>{x.module}</span><strong>{x.id}</strong><small>{x.subject||x.person||x.title||x.offense||"Datensatz"}</small></button>)}
+        {!recent.length&&<p>Noch keine Vorgänge vorhanden.</p>}
+      </div>
+    </section>
+
+    <section className="quick-actions modern-quick-actions">
+      <button onClick={()=>setTab("bolos")}><strong>BOLOs öffnen</strong><span>Fahndungen und Gefahrenhinweise bearbeiten</span></button>
+      <button onClick={()=>setTab("files")}><strong>Akten öffnen</strong><span>Ermittlungs- und Verwaltungsvorgänge einsehen</span></button>
+      <button onClick={()=>setTab("people")}><strong>Personregister</strong><span>Personen suchen und verknüpfte Datensätze prüfen</span></button>
     </section>
   </div>
 }
