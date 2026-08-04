@@ -13,7 +13,10 @@ export async function GET() {
         id: employee.id,
         employeeKey: employee.employee_key,
         displayName: employee.display_name,
-        role: employee.role
+        role: employee.role,
+        department: employee.department,
+        departmentHead: employee.department_head,
+        dutyStatus: employee.duty_status
       }
     });
   } catch (error) {

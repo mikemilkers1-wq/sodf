@@ -2,69 +2,16 @@ import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ensureDatabase } from "@/lib/setup";
-import { requireSession, hasAdminAccess } from "@/lib/auth";
-
-export const dynamic = "force-dynamic";
-
-async function requireAdmin() {
-  const employee = await requireSession();
-  if (!employee || employee.role !== "sheriff_admin") return null;
-  if (!(await hasAdminAccess())) return null;
-  return employee;
-}
-
-export async function GET() {
-  try {
-    await ensureDatabase();
-    const admin = await requireAdmin();
-    if (!admin) return NextResponse.json({ error: "Nur der Sheriff-Administrator hat Zugriff." }, { status: 403 });
-
-    const sql = db();
-    const employees = await sql`
-      SELECT id, employee_key, display_name, role, status, created_at, last_login_at
-      FROM rcso_employees
-      ORDER BY display_name
-    `;
-    return NextResponse.json({ employees });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: "Mitarbeiterliste konnte nicht geladen werden." }, { status: 500 });
-  }
-}
-
-export async function POST(request) {
-  try {
-    await ensureDatabase();
-    const admin = await requireAdmin();
-    if (!admin) return NextResponse.json({ error: "Nur der Sheriff-Administrator hat Zugriff." }, { status: 403 });
-
-    const { employeeKey, displayName, validationCode, role } = await request.json();
-    if (!employeeKey?.trim() || !displayName?.trim() || !validationCode || validationCode.length < 8) {
-      return NextResponse.json({ error: "Alle Felder sind erforderlich; der Code muss mindestens 8 Zeichen haben." }, { status: 400 });
-    }
-
-    const allowed = new Set(["sheriff_admin", "supervisor", "deputy", "dispatcher", "read_only"]);
-    if (!allowed.has(role)) return NextResponse.json({ error: "Ungültige Rolle." }, { status: 400 });
-
-    const sql = db();
-    const hash = await bcrypt.hash(validationCode, 12);
-    const rows = await sql`
-      INSERT INTO rcso_employees (employee_key, display_name, validation_code_hash, role)
-      VALUES (${employeeKey.trim()}, ${displayName.trim()}, ${hash}, ${role})
-      RETURNING id, employee_key, display_name, role, status, created_at, last_login_at
-    `;
-
-    await sql`
-      INSERT INTO rcso_audit_log (employee_id, action, details)
-      VALUES (${admin.id}, 'EMPLOYEE_CREATED', ${JSON.stringify({ employeeId: rows[0].id, employeeKey: rows[0].employee_key, role })}::jsonb)
-    `;
-
-    return NextResponse.json({ employee: rows[0] }, { status: 201 });
-  } catch (error) {
-    console.error(error);
-    if (String(error?.message || "").toLowerCase().includes("unique")) {
-      return NextResponse.json({ error: "Diese Mitarbeiterkennung existiert bereits." }, { status: 409 });
-    }
-    return NextResponse.json({ error: "Mitarbeiterkonto konnte nicht angelegt werden." }, { status: 500 });
-  }
-}
+import { requireSession,hasAdminAccess } from "@/lib/auth";
+const roles=["sheriff_admin","supervisor","deputy","dispatcher","read_only"];
+const departments=["Office of the County Sheriff","Administrative Services Bureau","Field Operations Bureau","Investigations Bureau","Special Operations Bureau"];
+async function admin(){const e=await requireSession();return e?.role==="sheriff_admin"&&await hasAdminAccess()?e:null}
+export async function GET(){await ensureDatabase();if(!await admin())return NextResponse.json({error:"Zugriff verweigert."},{status:403});const sql=db();return NextResponse.json({employees:await sql`SELECT id,employee_key,display_name,role,status,department,department_head,duty_status,created_at,last_login_at FROM rcso_employees ORDER BY display_name`})}
+export async function POST(r){await ensureDatabase();const a=await admin();if(!a)return NextResponse.json({error:"Zugriff verweigert."},{status:403});const b=await r.json();if(!b.employeeKey?.trim()||!b.displayName?.trim()||String(b.validationCode||"").length<8)return NextResponse.json({error:"Kennung, Name und Code mit mindestens 8 Zeichen erforderlich."},{status:400});if(!roles.includes(b.role)||!departments.includes(b.department))return NextResponse.json({error:"Ungültige Rolle oder Abteilung."},{status:400});const sql=db();const h=await bcrypt.hash(b.validationCode,12);try{const x=await sql`INSERT INTO rcso_employees(employee_key,display_name,validation_code_hash,role,department,department_head) VALUES(${b.employeeKey.trim()},${b.displayName.trim()},${h},${b.role},${b.department},${!!b.departmentHead}) RETURNING id`;return NextResponse.json({employee:x[0]},{status:201})}catch(e){return NextResponse.json({error:"Konto konnte nicht angelegt werden."},{status:409})}}
+export async function PATCH(r){await ensureDatabase();const a=await admin();if(!a)return NextResponse.json({error:"Zugriff verweigert."},{status:403});const b=await r.json();const id=Number(b.id);const sql=db();
+ if(b.action==="edit"){if(!roles.includes(b.role)||!departments.includes(b.department)||!b.displayName?.trim())return NextResponse.json({error:"Ungültige Angaben."},{status:400});await sql`UPDATE rcso_employees SET display_name=${b.displayName.trim()},role=${b.role},department=${b.department},department_head=${!!b.departmentHead} WHERE id=${id}`;}
+ else if(b.action==="reset_code"){if(String(b.validationCode||"").length<8)return NextResponse.json({error:"Mindestens 8 Zeichen."},{status:400});const h=await bcrypt.hash(b.validationCode,12);await sql`UPDATE rcso_employees SET validation_code_hash=${h} WHERE id=${id}`;}
+ else if(b.action==="status"){if(!["active","inactive"].includes(b.status))return NextResponse.json({error:"Ungültiger Status."},{status:400});await sql`UPDATE rcso_employees SET status=${b.status} WHERE id=${id}`;}
+ else return NextResponse.json({error:"Unbekannte Aktion."},{status:400});
+ await sql`INSERT INTO rcso_audit_log(employee_id,action,details) VALUES(${a.id},'EMPLOYEE_UPDATED',${JSON.stringify({id,action:b.action})}::jsonb)`;return NextResponse.json({ok:true})}
+export async function DELETE(r){await ensureDatabase();const a=await admin();if(!a)return NextResponse.json({error:"Zugriff verweigert."},{status:403});const id=Number(new URL(r.url).searchParams.get("id"));if(id===Number(a.id))return NextResponse.json({error:"Eigenes Konto kann nicht gelöscht werden."},{status:409});const sql=db();await sql`DELETE FROM rcso_employees WHERE id=${id}`;return NextResponse.json({ok:true})}

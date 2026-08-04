@@ -17,6 +17,9 @@ const roleDescriptions = {
   read_only: "Kann Datensätze ausschließlich ansehen."
 };
 
+const departments = ["Office of the County Sheriff","Administrative Services Bureau","Field Operations Bureau","Investigations Bureau","Special Operations Bureau"];
+const departmentLabel = employee => `${employee?.department||"Keine Abteilung"}${employee?.departmentHead?" · Department Head":""}`;
+
 const permissions = {
   sheriff_admin: new Set(["create","edit","delete","admin"]),
   supervisor: new Set(["create","edit","delete"]),
@@ -97,8 +100,10 @@ export default function Portal(){
   const [message,setMessage]=useState("");
   const [search,setSearch]=useState("");
   const [showLoginPassword,setShowLoginPassword]=useState(false);
+  const [theme,setTheme]=useState("light");
 
-  useEffect(()=>{bootstrap()},[]);
+  useEffect(()=>{const saved=localStorage.getItem("rcso-theme")||"light";setTheme(saved);bootstrap()},[]);
+  useEffect(()=>{localStorage.setItem("rcso-theme",theme)},[theme]);
   useEffect(()=>{if(!employee)return;const t=setInterval(()=>refreshState(false),8000);return()=>clearInterval(t)},[employee,version]);
 
   async function bootstrap(){
@@ -147,6 +152,11 @@ export default function Portal(){
     if(!ok)return;
     try{await unlinkPersonRecord(kind,record)}catch(error){setMessage(`Datensatz gelöscht; alter Personregister-Verweis konnte nicht entfernt werden: ${error.message}`)}
     setSelected(null);
+  }
+  async function toggleDuty(){
+    const dutyStatus=employee.dutyStatus==="on_duty"?"off_duty":"on_duty";
+    const r=await fetch("/api/auth/duty",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({dutyStatus})});
+    const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Dienststatus konnte nicht geändert werden.");setEmployee(p.employee);
   }
   const filtered=useMemo(()=>{
     const q=search.trim().toLowerCase();if(!q)return null;const result=[];
@@ -240,16 +250,16 @@ export default function Portal(){
 
   const tabs=[["home","⌂","Homepage"],["people","◉","Personregister"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
 
-  return <main className="terminal modern-rcso-terminal">
+  return <main className={`terminal modern-rcso-terminal theme-${theme}`}>
     <div className="les-banner"><strong>LAW ENFORCEMENT SENSITIVE</strong><span>RIVERSIDE COUNTY INTERNAL NETWORK</span></div>
     <header className="terminal-header"><div className="brand"><img src="/rcso-logo.png" alt=""/><div><strong>Riverside County Sheriff&apos;s Office</strong><small>Law Enforcement Records Terminal</small></div></div>
-      <div className="user-box"><div><strong>{employee.displayName}</strong><small>{roleLabels[employee.role]}</small></div><button onClick={logout}>Abmelden</button></div></header>
+      <div className="user-box"><div><strong>{employee.displayName}</strong><small>{roleLabels[employee.role]} · {departmentLabel(employee)}</small></div><button className="theme-toggle" onClick={()=>setTheme(theme==="light"?"dark":"light")}>{theme==="light"?"Dark Mode":"Light Mode"}</button><button onClick={logout}>Abmelden</button></div></header>
     <nav className="tabs">{tabs.map(([id,symbol,label])=><button key={id} className={tab===id?"active":""} onClick={()=>{setTab(id);setSelected(null)}}><span>{symbol}</span>{label}</button>)}</nav>
     <div className="system-strip"><span><strong>RCSO-NET</strong></span><span>Datenversion {version??"—"}</span><label className="global-search">Suche <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Person, Vorgang oder Aktenzeichen"/></label><span className="ready">● Verbindung verfügbar</span></div>
     {message&&<div className="status-message">{message}</div>}
     <section className="workspace">
       {search.trim()?<SearchResults filtered={filtered} setTab={setTab} setSelected={setSelected} setSearch={setSearch}/>:<>
-        {tab==="home"&&<Home state={state} employee={employee} setTab={setTab}/>}        {tab==="people"&&<PersonRegister employee={employee}/>}
+        {tab==="home"&&<Home state={state} employee={employee} setTab={setTab} toggleDuty={toggleDuty}/>}        {tab==="people"&&<PersonRegister employee={employee}/>}
         {tab==="employees"&&<EmployeeDirectory employee={employee}/>}
         {tab==="bolos"&&<RecordModule employee={employee} title="BOLOs" kind="bolos" records={state.bolos} selected={selected} setSelected={setSelected} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} prefix="RCSO-BOLO" fields={[
           ["boloType","BOLO-Typ","select",["Individual","Vehicle","Property / Object","Unknown Subject"]],          ["personId","Verknüpfte Person","person"],
@@ -281,7 +291,7 @@ function SearchResults({filtered,setTab,setSelected,setSearch}){
     {filtered?.length===0&&<p>Keine Treffer.</p>}</div>
 }
 
-function Home({state,employee,setTab}){
+function Home({state,employee,setTab,toggleDuty}){
   const recent=[...state.bolos.map(x=>({...x,module:"BOLO",tab:"bolos"})),...state.files.map(x=>({...x,module:"Akte",tab:"files"})),...state.arrests.map(x=>({...x,module:"Festnahme",tab:"arrests"})),...state.complaints.map(x=>({...x,module:"Strafanzeige",tab:"complaints"}))]
     .sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).slice(0,6);
 
@@ -292,8 +302,11 @@ function Home({state,employee,setTab}){
         <p className="welcome-kicker">RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</p>
         <h2>Willkommen, {employee.displayName}.</h2>
         <p>Dieses Terminal dient der dienstlichen Bearbeitung von Fahndungen, Akten, Festnahmen, Strafanzeigen und behördenübergreifenden Personenverknüpfungen.</p>
-        <p><strong>Aktuelle Funktion:</strong> {roleLabels[employee.role]}</p>
-        <p>{roleDescriptions[employee.role]}</p>
+        <div className="officer-summary">
+          <div><span>Dienststatus</span><strong className={employee.dutyStatus==="on_duty"?"duty-on":"duty-off"}>{employee.dutyStatus==="on_duty"?"On Duty":"Off Duty"}</strong><button onClick={toggleDuty}>Status wechseln</button></div>
+          <div><span>Abteilung</span><strong>{employee.department||"Keine Abteilung"}</strong><small>{employee.departmentHead?"Abteilungsleitung":"Reguläres Abteilungsmitglied"}</small></div>
+          <div><span>Rolle</span><strong>{roleLabels[employee.role]}</strong><small>{roleDescriptions[employee.role]}</small></div>
+        </div>
       </div>
     </section>
 
@@ -351,37 +364,48 @@ function PersonPicker({name,label}){
   </label>
 }
 
+function RecordEditorModal({config,onClose}){
+  if(!config)return null;
+  const {title,fields,record,onSubmit}=config;
+  return <div className="record-modal-overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <section className="record-modal-dialog"><header><strong>{title}</strong><button type="button" onClick={onClose}>×</button></header>
+      <form onSubmit={async e=>{e.preventDefault();await onSubmit(new FormData(e.currentTarget));onClose()}}>
+        <div className="record-modal-grid">{fields.map(([k,l,type,options])=><label key={k}>{l}{type==="select"?<select name={k} defaultValue={record?.[k]||options?.[0]}>{options.map(o=><option key={o}>{o}</option>)}</select>:<input name={k} defaultValue={record?.[k]||""}/>}</label>)}<label className="span-2">Notizen<textarea name="notes" defaultValue={record?.notes||""} rows="5"/></label></div>
+        <footer><button type="button" onClick={onClose}>Abbrechen</button><button type="submit">Speichern</button></footer>
+      </form>
+    </section></div>
+}
+
 function RecordModule({employee,title,kind,records,selected,setSelected,addRecord,updateRecord,removeRecord,prefix,fields}){
-  const current=records.find(x=>x.id===selected), mayCreate=can(employee,"create",kind), mayEdit=can(employee,"edit",kind), mayDelete=can(employee,"delete",kind);
-  async function submit(e){e.preventDefault();const f=new FormData(e.currentTarget);const record={id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName};for(const [key] of fields)record[key]=f.get(key);record.notes=f.get("notes");await addRecord(kind,record);
-    e.currentTarget.reset()}
-  return <div className="record-layout">
-    <section className="panel list-panel"><div className="panel-header">{title.toUpperCase()}</div>
-      {mayCreate?<form className="record-form" onSubmit={submit}>{fields.map(([k,l,t,o])=><Field key={k} name={k} label={l} type={t} options={o}/>)}<label>Notizen<textarea name="notes" rows="3"/></label><button type="submit">＋ Datensatz anlegen</button></form>:<div className="permission-note">Ihre Rolle darf hier keine neuen Datensätze anlegen.</div>}
+  const [editor,setEditor]=useState(null);
+  const current=records.find(x=>x.id===selected),mayCreate=can(employee,"create",kind),mayEdit=can(employee,"edit",kind),mayDelete=can(employee,"delete",kind);
+  async function saveEditor(f){const values=Object.fromEntries(f);if(editor.mode==="create"){await addRecord(kind,{...values,id:nextId(prefix,records),createdAt:nowIso(),updatedAt:nowIso(),createdBy:employee.displayName})}else await updateRecord(kind,current.id,values)}
+  return <><div className="record-layout">
+    <section className="panel list-panel"><div className="panel-header panel-header-actions"><span>{title.toUpperCase()}</span>{mayCreate&&<button onClick={()=>setEditor({mode:"create"})}>＋ Neu anlegen</button>}</div>
+      {!mayCreate&&<div className="permission-note">Ihre Rolle darf hier keine neuen Datensätze anlegen.</div>}
       <div className="record-list">{records.map(x=><button key={x.id} className={selected===x.id?"selected":""} onClick={()=>setSelected(x.id)}><strong>{x.id}</strong><span>{x.subject||x.person||x.title||x.offense}</span></button>)}{!records.length&&<p>Keine Datensätze vorhanden.</p>}</div></section>
     <section className="panel detail-panel"><div className="panel-header">DETAILANSICHT</div>{!current?<p>Datensatz auswählen.</p>:<div className="record-detail"><h2>{current.id}</h2>
       {fields.map(([k,l])=><p key={k}><strong>{l}:</strong> {current[k]||"—"}</p>)}<p><strong>Erstellt:</strong> {fmt(current.createdAt)}</p><p><strong>Erstellt durch:</strong> {current.createdBy||"—"}</p><p><strong>Notizen:</strong><br/>{current.notes||"—"}</p>
-      <div className="detail-actions">{mayEdit&&<button onClick={()=>{const changes={};for(const [k,l] of fields){const v=prompt(l,current[k]||"");if(v===null)return;changes[k]=v}updateRecord(kind,current.id,changes)}}>Bearbeiten</button>}{mayDelete&&<button className="danger" onClick={()=>removeRecord(kind,current.id)}>Löschen</button>}</div></div>}</section>
-  </div>
+      <div className="detail-actions">{mayEdit&&<button onClick={()=>setEditor({mode:"edit"})}>Bearbeiten</button>}{mayDelete&&<button className="danger" onClick={()=>removeRecord(kind,current.id)}>Löschen</button>}</div></div>}</section>
+  </div><RecordEditorModal config={editor&&{title:editor.mode==="create"?`${title}: neuen Datensatz anlegen`:`${current?.id} bearbeiten`,fields,record:editor.mode==="edit"?current:null,onSubmit:saveEditor}} onClose={()=>setEditor(null)}/></>
 }
-
 
 function Admin({employee}){
-  const [unlocked,setUnlocked]=useState(false),[employees,setEmployees]=useState([]),[message,setMessage]=useState("");
-  useEffect(()=>{fetch("/api/admin/status",{cache:"no-store"}).then(r=>r.json()).then(p=>{setUnlocked(!!p.unlocked);if(p.unlocked)load()})},[]);
-  async function unlock(e){e.preventDefault();const f=new FormData(e.currentTarget);const r=await fetch("/api/admin/unlock",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({adminCode:f.get("adminCode")})});const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Admin-Zugang fehlgeschlagen.");setUnlocked(true);setMessage("");await load()}
-  async function lock(){await fetch("/api/admin/lock",{method:"POST"});setUnlocked(false);setEmployees([])}
-  async function load(){const r=await fetch("/api/admin/employees",{cache:"no-store"});const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Mitarbeiterliste konnte nicht geladen werden.");setEmployees(p.employees)}
-  async function create(e){e.preventDefault();const f=new FormData(e.currentTarget);const r=await fetch("/api/admin/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employeeKey:f.get("employeeKey"),displayName:f.get("displayName"),validationCode:f.get("validationCode"),role:f.get("role")})});const p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");e.currentTarget.reset();setMessage("Mitarbeiterkonto angelegt.");await load()}
-  if(employee.role!=="sheriff_admin")return <section className="panel admin-denied"><div className="panel-header">ADMIN-MENÜ</div><p>Nur ein Sheriff Administrator kann diesen Bereich öffnen.</p></section>;
-  if(!unlocked)return <section className="admin-unlock"><img src="/rcso-logo.png" alt=""/><form onSubmit={unlock}><div className="panel-header">ADMINISTRATIVE AUTORISIERUNG</div><p>Zusätzlich zum persönlichen Konto ist der zentrale Administrationscode erforderlich.</p><label>Administrationscode<input name="adminCode" type="password" required autoFocus/></label><button type="submit">Admin-Menü entsperren</button><div className="message">{message}</div></form></section>;
-  return <div className="admin-layout"><section className="panel"><div className="panel-header">MITARBEITER ANLEGEN</div><form className="record-form" onSubmit={create}>
-    <label>Mitarbeiterkennung<input name="employeeKey" required/></label><label>Anzeigename<input name="displayName" required/></label><label>Persönlicher Validierungscode<input name="validationCode" type="password" minLength="8" required/></label>
-    <label>Rang / Rolle<select name="role"><option value="deputy">Deputy</option><option value="supervisor">Supervisor</option><option value="dispatcher">Dispatcher</option><option value="read_only">Nur Lesen</option><option value="sheriff_admin">Sheriff Administrator</option></select></label>
-    <button type="submit">Mitarbeiterkonto anlegen</button></form><p>{message}</p><button className="lock-button" onClick={lock}>Admin-Menü sperren</button></section>
-    <section className="panel"><div className="panel-header">MITARBEITERKONTEN</div><table><thead><tr><th>Kennung</th><th>Name</th><th>Rang / Rolle</th><th>Status</th></tr></thead><tbody>{employees.map(e=><tr key={e.id}><td>{e.employee_key}</td><td>{e.display_name}</td><td>{roleLabels[e.role]}</td><td>{e.status}</td></tr>)}</tbody></table></section></div>
+ const [unlocked,setUnlocked]=useState(false),[employees,setEmployees]=useState([]),[message,setMessage]=useState(""),[edit,setEdit]=useState(null);
+ useEffect(()=>{fetch("/api/admin/status",{cache:"no-store"}).then(r=>r.json()).then(p=>{setUnlocked(!!p.unlocked);if(p.unlocked)load()})},[]);
+ async function unlock(e){e.preventDefault();const f=new FormData(e.currentTarget),r=await fetch("/api/admin/unlock",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({adminCode:f.get("adminCode")})}),p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");setUnlocked(true);load()}
+ async function load(){const r=await fetch("/api/admin/employees",{cache:"no-store"}),p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");setEmployees(p.employees)}
+ async function create(e){e.preventDefault();const f=new FormData(e.currentTarget),r=await fetch("/api/admin/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...Object.fromEntries(f),departmentHead:f.has("departmentHead")})}),p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");e.currentTarget.reset();setMessage("Mitarbeiterkonto angelegt.");load()}
+ async function action(body){const r=await fetch("/api/admin/employees",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");setEdit(null);setMessage("Änderung gespeichert.");load()}
+ async function del(id){if(!confirm("Mitarbeiterkonto endgültig löschen?"))return;const r=await fetch(`/api/admin/employees?id=${id}`,{method:"DELETE"}),p=await r.json().catch(()=>({}));if(!r.ok)return setMessage(p.error||"Fehler");load()}
+ if(employee.role!=="sheriff_admin")return <section className="panel"><div className="panel-header">ADMIN-MENÜ</div><p>Zugriff verweigert.</p></section>;
+ if(!unlocked)return <section className="admin-unlock"><img src="/rcso-logo.png" alt=""/><form onSubmit={unlock}><div className="panel-header">ADMINISTRATIVE AUTORISIERUNG</div><label>Administrationscode<input name="adminCode" type="password" required/></label><button>Entsperren</button><div>{message}</div></form></section>;
+ return <><div className="admin-layout"><section className="panel"><div className="panel-header">MITARBEITER ANLEGEN</div><form className="record-form employee-create-form" onSubmit={create}>
+  <label>Kennung<input name="employeeKey" required/></label><label>Anzeigename<input name="displayName" required/></label><label>Passwort / Code<input name="validationCode" type="password" minLength="8" required/></label>
+  <label>Rolle<select name="role">{Object.entries(roleLabels).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label>Abteilung<select name="department">{departments.map(d=><option key={d}>{d}</option>)}</select></label><label className="check-label"><input type="checkbox" name="departmentHead"/> Abteilungsleitung</label><button>Konto anlegen</button></form></section>
+  <section className="panel employee-management-panel"><div className="panel-header">MITARBEITERKONTEN</div><div className="employee-cards">{employees.map(e=><article key={e.id}><div><strong>{e.display_name}</strong><span>{e.employee_key}</span><small>{roleLabels[e.role]} · {e.department}{e.department_head?" · Leitung":""}</small><small>{e.status} · {e.duty_status==="on_duty"?"On Duty":"Off Duty"}</small></div><div><button onClick={()=>setEdit(e)}>Bearbeiten</button><button onClick={()=>{const c=prompt("Neuer Code (mind. 8 Zeichen)");if(c)action({id:e.id,action:"reset_code",validationCode:c})}}>Code zurücksetzen</button><button onClick={()=>action({id:e.id,action:"status",status:e.status==="active"?"inactive":"active"})}>{e.status==="active"?"Deaktivieren":"Aktivieren"}</button><button className="danger" onClick={()=>del(e.id)}>Löschen</button></div></article>)}</div><p>{message}</p></section></div>
+  <PersonModal config={edit&&{title:"Mitarbeiterkonto bearbeiten",body:<div className="person-form-grid"><TextField name="displayName" label="Anzeigename" defaultValue={edit.display_name} required/><SelectField name="role" label="Rolle" defaultValue={edit.role} options={Object.keys(roleLabels)}/><SelectField name="department" label="Abteilung" defaultValue={edit.department} options={departments}/><label><input name="departmentHead" type="checkbox" defaultChecked={edit.department_head}/> Abteilungsleitung</label></div>,onSubmit:f=>action({id:edit.id,action:"edit",displayName:f.get("displayName"),role:f.get("role"),department:f.get("department"),departmentHead:f.has("departmentHead")})}} onClose={()=>setEdit(null)}/></>
 }
-
 
 
 function PersonModal({config,onClose}){

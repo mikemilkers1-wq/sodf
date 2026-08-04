@@ -15,7 +15,7 @@ export async function POST(request) {
 
     const sql = db();
     const rows = await sql`
-      SELECT id, employee_key, display_name, validation_code_hash, role, status
+      SELECT id, employee_key, display_name, validation_code_hash, role, status, department, department_head, duty_status
       FROM rcso_employees
       WHERE LOWER(employee_key) = LOWER(${employeeKey.trim()})
       LIMIT 1
@@ -47,7 +47,10 @@ export async function POST(request) {
         id: employee.id,
         employeeKey: employee.employee_key,
         displayName: employee.display_name,
-        role: employee.role
+        role: employee.role,
+        department: employee.department,
+        departmentHead: employee.department_head,
+        dutyStatus: employee.duty_status
       }
     });
   } catch (error) {
