@@ -1292,3 +1292,157 @@ table{width:100%;border-collapse:collapse;color:var(--ink)}th,td{border:1px soli
 .person-register button,.person-modal-actions button{background:#f3f6f4!important;color:#18392e!important;border-color:#91a69c!important}.person-register button.primary,.person-modal-actions button:last-child{background:var(--green)!important;color:#fff!important}
 .employee-cards{display:grid;gap:10px;padding:12px}.employee-cards article{display:flex;justify-content:space-between;gap:14px;padding:14px;border:1px solid var(--rcso-border);border-radius:10px;background:var(--rcso-paper)}.employee-cards article>div:first-child{display:grid;gap:3px}.employee-cards article>div:last-child{display:flex;flex-wrap:wrap;gap:6px}.employee-cards button{border:1px solid #91a39b;border-radius:6px;background:#f5f7f6;padding:6px 9px}.employee-create-form{grid-template-columns:1fr 1fr}.check-label{display:flex!important;align-items:center;gap:8px}.check-label input{width:auto}
 @media(max-width:800px){.officer-summary{grid-template-columns:1fr}.record-modal-grid{grid-template-columns:1fr}.record-modal-grid .span-2{grid-column:auto}.employee-cards article{flex-direction:column}}
+
+
+/* RCSO v0.42 - compact user block, employee directory and PDF actions */
+.rcso-compact-user {
+  min-width: 155px;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: #173b2e;
+  font-size: 10px;
+  text-align: right;
+}
+.rcso-compact-user span {
+  padding: 2px 6px;
+  border: 1px solid #7c9690;
+  background: #edf3f0;
+  color: #173b2e;
+  font-weight: 700;
+}
+.rcso-compact-user strong {
+  color: #111 !important;
+  font: 700 11px Arial, Helvetica, sans-serif !important;
+  letter-spacing: 0 !important;
+}
+.rcso-compact-user button {
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  color: #194f77 !important;
+  font-size: 10px;
+  font-weight: 400 !important;
+  text-decoration: underline;
+  box-shadow: none !important;
+}
+
+.employee-directory-layout {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: 315px minmax(0, 1fr);
+  gap: 12px;
+}
+.employee-directory-list-panel,
+.employee-directory-profile-panel {
+  min-height: 0;
+}
+.employee-directory-list {
+  display: grid;
+  align-content: start;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+.employee-directory-list button {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 0;
+  border-bottom: 1px solid #d0d9d4;
+  background: #fff;
+  color: #1b2923;
+  text-align: left;
+}
+.employee-directory-list button:hover {
+  background: #eef5f1;
+}
+.employee-directory-list button.selected {
+  background: #dcece4;
+  box-shadow: inset 4px 0 #174f3a;
+}
+.employee-directory-list img {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border: 1px solid #93a49c;
+  background: #ddd;
+}
+.employee-directory-list span {
+  display: grid;
+  gap: 2px;
+}
+.employee-directory-list small {
+  color: #637069;
+}
+.employee-public-profile {
+  padding: 22px 28px 30px;
+  color: #17231e;
+}
+.employee-public-profile h2 {
+  margin: 0 0 22px;
+  color: #173b2e;
+  font: 700 27px Arial, Helvetica, sans-serif;
+}
+.employee-profile-hero {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 70px;
+  min-height: 210px;
+  margin-bottom: 22px;
+}
+.employee-profile-hero > img:first-child {
+  width: 155px;
+  height: 190px;
+  object-fit: cover;
+  border: 1px solid #9ca8a2;
+}
+.employee-agency-logo {
+  width: 165px;
+  height: 165px;
+  object-fit: contain;
+}
+.employee-biography {
+  margin: 0 auto 25px;
+  max-width: 1000px;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+.employee-public-profile dl {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  max-width: 900px;
+  margin: 0 auto;
+  border-top: 1px solid #c3cdc7;
+}
+.employee-public-profile dt,
+.employee-public-profile dd {
+  margin: 0;
+  padding: 9px 10px;
+  border-bottom: 1px solid #d6ded9;
+}
+.employee-public-profile dt {
+  color: #174f3a;
+  font-weight: 700;
+}
+.person-form-grid .span-2 {
+  grid-column: 1 / -1;
+}
+.person-form-grid textarea {
+  width: 100%;
+  min-height: 130px;
+}
+@media (max-width: 850px) {
+  .employee-directory-layout {
+    grid-template-columns: 1fr;
+  }
+  .employee-directory-list {
+    max-height: 280px;
+  }
+  .employee-profile-hero {
+    gap: 25px;
+  }
+}

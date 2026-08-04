@@ -82,14 +82,212 @@ async function unlinkPersonRecord(kind, record){
 }
 
 
-function pdfEscape(value){return String(value??"").replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)")}
-function wrapPdf(lines,max=92){const out=[];for(const raw of lines){let line=String(raw??"");if(!line){out.push("");continue}while(line.length>max){let cut=line.lastIndexOf(" ",max);if(cut<20)cut=max;out.push(line.slice(0,cut));line=line.slice(cut).trimStart()}out.push(line)}return out}
-function downloadPersonPdf(person){
-  const lines=wrapPdf([`PERSON PROFILE — ${person.public_id}`,"Riverside County Shared Person Register","",`Legal name: ${[person.legal_first_name,person.legal_middle_name,person.legal_last_name,person.suffix].filter(Boolean).join(" ")}`,`Status: ${person.status}`,`DOB: ${person.date_of_birth||"—"}`,`Sex: ${person.sex||"—"}`,`SSN: ${person.ssn_masked||"—"}`,`Driver License: ${person.driver_license_masked||"—"}`,"","ADDRESSES",...(person.addresses||[]).map(a=>`- ${a.line1}, ${a.city}, ${a.state_code} ${a.postal_code||""}${a.is_current?" (current)":""}`),"","ROLES",...(person.roles||[]).map(r=>`- ${r.organization} — ${r.title_or_rank||r.role_type}${r.badge_number?` — Badge ${r.badge_number}`:""}`),"","DEPARTMENT LINKS",...(person.links||[]).map(l=>`- ${l.department} / ${l.record_type} / ${l.record_id} / ${l.record_status||"—"} / ${l.summary||"—"}`),"","EVENTS",...(person.events||[]).map(e=>`- ${e.event_category}: ${e.title} / ${e.event_status||"—"} / ${e.department} / ${e.summary||"—"}`),"",`Exported: ${new Date().toISOString()}`]);
-  const pages=[];for(let i=0;i<lines.length;i+=48)pages.push(lines.slice(i,i+48));const objects=[null],add=v=>(objects.push(v),objects.length-1),font=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),pageIds=[],contentIds=[];
-  for(const page of pages){const cmds=["BT","/F1 10 Tf","42 760 Td","12 TL"];page.forEach((line,i)=>{if(i)cmds.push("T*");cmds.push(`(${pdfEscape(line)}) Tj`)});cmds.push("ET");const stream=cmds.join("\n");contentIds.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));pageIds.push(add(""))}
-  const pagesId=add("");pageIds.forEach((id,i)=>objects[id]=`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${contentIds[i]} 0 R >>`);objects[pagesId]=`<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map(id=>`${id} 0 R`).join(" ")}] >>`;const catalog=add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);let pdf="%PDF-1.4\n",offsets=[0];for(let i=1;i<objects.length;i++){offsets[i]=pdf.length;pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`}const xref=pdf.length;pdf+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;for(let i=1;i<objects.length;i++)pdf+=`${String(offsets[i]).padStart(10,"0")} 00000 n \n`;pdf+=`trailer\n<< /Size ${objects.length} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF`;const blob=new Blob([pdf],{type:"application/pdf"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`${person.public_id}-person-profile.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)
+function pdfAscii(value){
+  return String(value??"")
+    .replace(/Ä/g,"Ae").replace(/Ö/g,"Oe").replace(/Ü/g,"Ue")
+    .replace(/ä/g,"ae").replace(/ö/g,"oe").replace(/ü/g,"ue")
+    .replace(/ß/g,"ss").replace(/[–—]/g,"-")
+    .replace(/[^\x20-\x7E]/g,"?");
 }
+function pdfEscape(value){
+  return pdfAscii(value).replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)");
+}
+function pdfWrap(text,max=88){
+  const output=[];
+  for(const paragraph of String(text??"").split(/\n/)){
+    let remaining=pdfAscii(paragraph).trim();
+    if(!remaining){output.push("");continue}
+    while(remaining.length>max){
+      let cut=remaining.lastIndexOf(" ",max);
+      if(cut<24)cut=max;
+      output.push(remaining.slice(0,cut));
+      remaining=remaining.slice(cut).trimStart();
+    }
+    output.push(remaining);
+  }
+  return output;
+}
+function downloadOfficialPdf({documentType,title,identifier,status="—",sections=[],fileName}){
+  const W=612,H=792,margin=44,top=748,bottom=54;
+  const objects=[null];
+  const add=value=>(objects.push(value),objects.length-1);
+  const regular=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const bold=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+  const pages=[],streams=[];
+  let commands=[],y=top,pageNumber=1;
+
+  const push=(value)=>commands.push(value);
+  const text=(x,yy,size,value,font="F1")=>{
+    push(`BT /${font} ${size} Tf ${x} ${yy} Td (${pdfEscape(value)}) Tj ET`);
+  };
+  const line=(x1,y1,x2,y2,width=.7)=>{
+    push(`${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
+  };
+  const rect=(x,yy,w,h,fillGray=null,strokeGray=0.25)=>{
+    if(fillGray!==null)push(`${fillGray} g ${x} ${yy} ${w} ${h} re f`);
+    push(`${strokeGray} G ${x} ${yy} ${w} ${h} re S`);
+    push("0 g 0 G");
+  };
+  const header=()=>{
+    rect(0,H-34,W,34,0.16,0.16);
+    text(margin,H-22,10,"RIVERSIDE COUNTY SHERIFF'S OFFICE","F2");
+    text(W-margin-126,H-22,8,"OFFICIAL RECORD","F2");
+    text(margin,H-54,17,documentType,"F2");
+    text(margin,H-72,11,title,"F1");
+    text(W-margin-165,H-55,9,identifier,"F2");
+    text(W-margin-165,H-70,8,`Status: ${status}`,"F1");
+    line(margin,H-82,W-margin,H-82,1.2);
+    y=H-104;
+  };
+  const footer=()=>{
+    line(margin,38,W-margin,38,.5);
+    text(margin,24,7,"LAW ENFORCEMENT SENSITIVE - AUTHORIZED PERSONNEL ONLY","F2");
+    text(W-margin-62,24,7,`Page ${pageNumber}`,"F1");
+  };
+  const closePage=()=>{
+    footer();
+    const stream=commands.join("\n");
+    streams.push(add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`));
+    pages.push(add(""));
+    commands=[];
+    pageNumber+=1;
+    header();
+  };
+  const ensure=(needed)=>{
+    if(y-needed<bottom)closePage();
+  };
+
+  header();
+
+  for(const section of sections){
+    ensure(52);
+    rect(margin,y-19,W-margin*2,22,0.90,0.45);
+    text(margin+8,y-12,10,section.heading.toUpperCase(),"F2");
+    y-=31;
+
+    for(const item of section.items||[]){
+      const label=pdfAscii(item.label||"");
+      const wrapped=pdfWrap(item.value??"—",76);
+      const required=Math.max(25,wrapped.length*12+9);
+      ensure(required);
+      text(margin+4,y,8,label.toUpperCase(),"F2");
+      let valueY=y-12;
+      for(const row of wrapped){
+        text(margin+16,valueY,9,row||" ","F1");
+        valueY-=12;
+      }
+      y=valueY-5;
+      line(margin,y+4,W-margin,y+4,.25);
+    }
+    y-=8;
+  }
+
+  footer();
+  const finalStream=commands.join("\n");
+  streams.push(add(`<< /Length ${finalStream.length} >>\nstream\n${finalStream}\nendstream`));
+  pages.push(add(""));
+
+  const pagesId=add("");
+  pages.forEach((id,index)=>{
+    objects[id]=`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >> >> /Contents ${streams[index]} 0 R >>`;
+  });
+  objects[pagesId]=`<< /Type /Pages /Count ${pages.length} /Kids [${pages.map(id=>`${id} 0 R`).join(" ")}] >>`;
+  const catalog=add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+
+  let pdf="%PDF-1.4\n",offsets=[0];
+  for(let i=1;i<objects.length;i++){
+    offsets[i]=pdf.length;
+    pdf+=`${i} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref=pdf.length;
+  pdf+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for(let i=1;i<objects.length;i++)pdf+=`${String(offsets[i]).padStart(10,"0")} 00000 n \n`;
+  pdf+=`trailer\n<< /Size ${objects.length} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF`;
+
+  const blob=new Blob([pdf],{type:"application/pdf"});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=fileName||`${identifier||"RCSO-record"}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function downloadPersonPdf(person){
+  const legalName=[person.legal_first_name,person.legal_middle_name,person.legal_last_name,person.suffix].filter(Boolean).join(" ");
+  downloadOfficialPdf({
+    documentType:"PERSONENPROFIL",
+    title:legalName||"Unbekannte Person",
+    identifier:person.public_id,
+    status:person.status,
+    fileName:`${person.public_id}-Personenprofil.pdf`,
+    sections:[
+      {heading:"Identitaet",items:[
+        {label:"Rechtlicher Name",value:legalName},
+        {label:"Geburtsdatum",value:person.date_of_birth||"—"},
+        {label:"Geschlecht",value:person.sex||"—"},
+        {label:"SSN",value:person.ssn_masked||"—"},
+        {label:"Fuehrerschein",value:person.driver_license_masked||"—"}
+      ]},
+      {heading:"Adressen",items:(person.addresses||[]).map((a,index)=>({
+        label:`Adresse ${index+1}${a.is_current?" - aktuell":""}`,
+        value:[a.line1,a.line2,a.city,a.state_code,a.postal_code].filter(Boolean).join(", ")
+      }))},
+      {heading:"Behoerdenrollen",items:(person.roles||[]).map((r,index)=>({
+        label:`Rolle ${index+1}`,
+        value:[r.organization,r.title_or_rank||r.role_type,r.badge_number?`Badge ${r.badge_number}`:""].filter(Boolean).join(" - ")
+      }))},
+      {heading:"Verknuepfte Behoerdendatensaetze",items:(person.links||[]).map((l,index)=>({
+        label:`Datensatz ${index+1}`,
+        value:[l.department,l.record_type,l.record_id,l.record_status,l.summary].filter(Boolean).join(" - ")
+      }))},
+      {heading:"Ereignisse",items:(person.events||[]).map((e,index)=>({
+        label:`Ereignis ${index+1}`,
+        value:[e.event_category,e.title,e.event_status,e.department,e.summary].filter(Boolean).join(" - ")
+      }))},
+      {heading:"Export",items:[{label:"Erstellt am",value:new Date().toLocaleString("de-DE")}]}
+    ]
+  });
+}
+function downloadRecordPdf(kind,record,fields){
+  const labels={
+    bolos:"BE-ON-THE-LOOKOUT NOTICE",
+    files:"AKTENBERICHT",
+    arrests:"FESTNAHMEPROTOKOLL",
+    complaints:"STRAFANZEIGE"
+  };
+  const titles={
+    bolos:record.subject||"BOLO",
+    files:record.title||record.subject||"Akte",
+    arrests:record.person||"Festnahme",
+    complaints:record.person||record.offense||"Strafanzeige"
+  };
+  const coreItems=(fields||[]).map(([key,label])=>({
+    label,
+    value:record[key]||"—"
+  }));
+  downloadOfficialPdf({
+    documentType:labels[kind]||"BEHOERDENDATENSATZ",
+    title:titles[kind],
+    identifier:record.id,
+    status:record.status||"Recorded",
+    fileName:`${record.id}.pdf`,
+    sections:[
+      {heading:"Vorgangsdaten",items:coreItems},
+      {heading:"Dokumentation",items:[
+        {label:"Notizen",value:record.notes||"—"},
+        {label:"Erstellt durch",value:record.createdBy||"—"},
+        {label:"Erstellt am",value:record.createdAt?fmt(record.createdAt):"—"},
+        {label:"Zuletzt aktualisiert",value:record.updatedAt?fmt(record.updatedAt):"—"}
+      ]},
+      {heading:"Rechtlicher Hinweis",items:[
+        {label:"Verwendung",value:"Dieser Export ist ein interner Riverside-County-Behoerdendatensatz. Weitergabe und Verwendung sind auf den dienstlichen Zweck beschraenkt."}
+      ]}
+    ]
+  });
+}
+
 
 export default function Portal(){
   const [employee,setEmployee]=useState(null);
@@ -100,10 +298,8 @@ export default function Portal(){
   const [message,setMessage]=useState("");
   const [search,setSearch]=useState("");
   const [showLoginPassword,setShowLoginPassword]=useState(false);
-  const [theme,setTheme]=useState("light");
 
-  useEffect(()=>{const saved=localStorage.getItem("rcso-theme")||"light";setTheme(saved);bootstrap()},[]);
-  useEffect(()=>{localStorage.setItem("rcso-theme",theme)},[theme]);
+  useEffect(()=>{bootstrap()},[]);
   useEffect(()=>{if(!employee)return;const t=setInterval(()=>refreshState(false),8000);return()=>clearInterval(t)},[employee,version]);
 
   async function bootstrap(){
@@ -250,10 +446,14 @@ export default function Portal(){
 
   const tabs=[["home","⌂","Homepage"],["people","◉","Personregister"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
 
-  return <main className={`terminal modern-rcso-terminal theme-${theme}`}>
+  return <main className="terminal modern-rcso-terminal">
     <div className="les-banner"><strong>LAW ENFORCEMENT SENSITIVE</strong><span>RIVERSIDE COUNTY INTERNAL NETWORK</span></div>
     <header className="terminal-header"><div className="brand"><img src="/rcso-logo.png" alt=""/><div><strong>Riverside County Sheriff&apos;s Office</strong><small>Law Enforcement Records Terminal</small></div></div>
-      <div className="user-box"><div><strong>{employee.displayName}</strong><small>{roleLabels[employee.role]} · {departmentLabel(employee)}</small></div><button className="theme-toggle" onClick={()=>setTheme(theme==="light"?"dark":"light")}>{theme==="light"?"Dark Mode":"Light Mode"}</button><button onClick={logout}>Abmelden</button></div></header>
+      <div className="rcso-compact-user">
+        <span>{roleLabels[employee.role]}</span>
+        <strong>{employee.displayName}</strong>
+        <button onClick={logout}>Log off</button>
+      </div></header>
     <nav className="tabs">{tabs.map(([id,symbol,label])=><button key={id} className={tab===id?"active":""} onClick={()=>{setTab(id);setSelected(null)}}><span>{symbol}</span>{label}</button>)}</nav>
     <div className="system-strip"><span><strong>RCSO-NET</strong></span><span>Datenversion {version??"—"}</span><label className="global-search">Suche <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Person, Vorgang oder Aktenzeichen"/></label><span className="ready">● Verbindung verfügbar</span></div>
     {message&&<div className="status-message">{message}</div>}
@@ -336,11 +536,62 @@ function Home({state,employee,setTab,toggleDuty}){
   </div>
 }
 
-function EmployeeDirectory({employee}){
-  return <section className="panel"><div className="panel-header">MITARBEITERLISTE</div>
-    <div className="directory-info"><p>Die Sheriff-Mitarbeiter besitzen unterschiedliche Rollen und Berechtigungen.</p>
-      {Object.entries(roleDescriptions).map(([role,text])=><div key={role}><strong>{roleLabels[role]}</strong><span>{text}</span></div>)}
-      <p className="small-note">Die vollständige Kontenliste befindet sich aus Sicherheitsgründen im separat entsperrten Admin-Menü.</p></div></section>
+function EmployeeDirectory(){
+  const [employees,setEmployees]=useState([]);
+  const [selectedId,setSelectedId]=useState(null);
+  const [error,setError]=useState("");
+
+  useEffect(()=>{
+    fetch("/api/employees",{cache:"no-store"})
+      .then(async response=>{
+        const payload=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(payload.error||"Mitarbeiterliste konnte nicht geladen werden.");
+        setEmployees(payload.employees||[]);
+        setSelectedId(current=>current||(payload.employees?.[0]?.id??null));
+      })
+      .catch(reason=>setError(reason.message));
+  },[]);
+
+  const selected=employees.find(item=>String(item.id)===String(selectedId));
+  const hired=selected?.created_at
+    ? new Date(selected.created_at).toLocaleDateString("de-DE",{year:"numeric",month:"long",day:"numeric"})
+    : "—";
+  const biography=selected?.biography_text||
+    `${selected?.display_name||"Der Mitarbeiter"} trat am ${hired} in den Dienst des Riverside County Sheriff's Office ein. Dieses interne Mitarbeiterprofil enthält Angaben zur derzeitigen Funktion, Abteilung und dienstlichen Einordnung. Ein ausführlicher dienstlicher Werdegang kann durch die autorisierte Behördenleitung ergänzt werden.`;
+
+  return <div className="employee-directory-layout">
+    <section className="panel employee-directory-list-panel">
+      <div className="panel-header">MITARBEITERLISTE</div>
+      <div className="employee-directory-list">
+        {employees.map(item=><button key={item.id} className={String(item.id)===String(selectedId)?"selected":""} onClick={()=>setSelectedId(item.id)}>
+          <img src={item.profile_photo_data_url||"/login/default-profile.png"} alt=""/>
+          <span><strong>{item.display_name}</strong><small>{roleLabels[item.role]}</small><small>{item.department}</small></span>
+        </button>)}
+        {!employees.length&&!error&&<p>Mitarbeiter werden geladen …</p>}
+        {error&&<p>{error}</p>}
+      </div>
+    </section>
+
+    <section className="panel employee-directory-profile-panel">
+      <div className="panel-header">MITARBEITERPROFIL</div>
+      {!selected?<div className="empty-detail">Mitarbeiter auswählen.</div>:<article className="employee-public-profile">
+        <header><h2>{roleLabels[selected.role]} {selected.display_name}</h2></header>
+        <div className="employee-profile-hero">
+          <img src={selected.profile_photo_data_url||"/login/default-profile.png"} alt="Mitarbeiterprofil"/>
+          <img className="employee-agency-logo" src="/rcso-logo.png" alt="Riverside County Sheriff's Office"/>
+        </div>
+        <div className="employee-biography">{biography}</div>
+        <dl>
+          <dt>Mitarbeiterkennung</dt><dd>{selected.employee_key}</dd>
+          <dt>Rang / Funktion</dt><dd>{roleLabels[selected.role]}</dd>
+          <dt>Abteilung</dt><dd>{selected.department}{selected.department_head?" · Abteilungsleitung":""}</dd>
+          <dt>Dienststatus</dt><dd>{selected.duty_status==="on_duty"?"On Duty":"Off Duty"}</dd>
+          <dt>Im Dienst seit</dt><dd>{hired}</dd>
+          <dt>Letzte Anmeldung</dt><dd>{selected.last_login_at?fmt(selected.last_login_at):"—"}</dd>
+        </dl>
+      </article>}
+    </section>
+  </div>
 }
 
 function Field({name,label,type="text",options=[]}){
@@ -386,7 +637,11 @@ function RecordModule({employee,title,kind,records,selected,setSelected,addRecor
       <div className="record-list">{records.map(x=><button key={x.id} className={selected===x.id?"selected":""} onClick={()=>setSelected(x.id)}><strong>{x.id}</strong><span>{x.subject||x.person||x.title||x.offense}</span></button>)}{!records.length&&<p>Keine Datensätze vorhanden.</p>}</div></section>
     <section className="panel detail-panel"><div className="panel-header">DETAILANSICHT</div>{!current?<p>Datensatz auswählen.</p>:<div className="record-detail"><h2>{current.id}</h2>
       {fields.map(([k,l])=><p key={k}><strong>{l}:</strong> {current[k]||"—"}</p>)}<p><strong>Erstellt:</strong> {fmt(current.createdAt)}</p><p><strong>Erstellt durch:</strong> {current.createdBy||"—"}</p><p><strong>Notizen:</strong><br/>{current.notes||"—"}</p>
-      <div className="detail-actions">{mayEdit&&<button onClick={()=>setEditor({mode:"edit"})}>Bearbeiten</button>}{mayDelete&&<button className="danger" onClick={()=>removeRecord(kind,current.id)}>Löschen</button>}</div></div>}</section>
+      <div className="detail-actions">
+        <button onClick={()=>downloadRecordPdf(kind,current,fields)}>Als PDF herunterladen</button>
+        {mayEdit&&<button onClick={()=>setEditor({mode:"edit"})}>Bearbeiten</button>}
+        {mayDelete&&<button className="danger" onClick={()=>removeRecord(kind,current.id)}>Löschen</button>}
+      </div></div>}</section>
   </div><RecordEditorModal config={editor&&{title:editor.mode==="create"?`${title}: neuen Datensatz anlegen`:`${current?.id} bearbeiten`,fields,record:editor.mode==="edit"?current:null,onSubmit:saveEditor}} onClose={()=>setEditor(null)}/></>
 }
 
@@ -404,7 +659,23 @@ function Admin({employee}){
   <label>Kennung<input name="employeeKey" required/></label><label>Anzeigename<input name="displayName" required/></label><label>Passwort / Code<input name="validationCode" type="password" minLength="8" required/></label>
   <label>Rolle<select name="role">{Object.entries(roleLabels).map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label><label>Abteilung<select name="department">{departments.map(d=><option key={d}>{d}</option>)}</select></label><label className="check-label"><input type="checkbox" name="departmentHead"/> Abteilungsleitung</label><button>Konto anlegen</button></form></section>
   <section className="panel employee-management-panel"><div className="panel-header">MITARBEITERKONTEN</div><div className="employee-cards">{employees.map(e=><article key={e.id}><div><strong>{e.display_name}</strong><span>{e.employee_key}</span><small>{roleLabels[e.role]} · {e.department}{e.department_head?" · Leitung":""}</small><small>{e.status} · {e.duty_status==="on_duty"?"On Duty":"Off Duty"}</small></div><div><button onClick={()=>setEdit(e)}>Bearbeiten</button><button onClick={()=>{const c=prompt("Neuer Code (mind. 8 Zeichen)");if(c)action({id:e.id,action:"reset_code",validationCode:c})}}>Code zurücksetzen</button><button onClick={()=>action({id:e.id,action:"status",status:e.status==="active"?"inactive":"active"})}>{e.status==="active"?"Deaktivieren":"Aktivieren"}</button><button className="danger" onClick={()=>del(e.id)}>Löschen</button></div></article>)}</div><p>{message}</p></section></div>
-  <PersonModal config={edit&&{title:"Mitarbeiterkonto bearbeiten",body:<div className="person-form-grid"><TextField name="displayName" label="Anzeigename" defaultValue={edit.display_name} required/><SelectField name="role" label="Rolle" defaultValue={edit.role} options={Object.keys(roleLabels)}/><SelectField name="department" label="Abteilung" defaultValue={edit.department} options={departments}/><label><input name="departmentHead" type="checkbox" defaultChecked={edit.department_head}/> Abteilungsleitung</label></div>,onSubmit:f=>action({id:edit.id,action:"edit",displayName:f.get("displayName"),role:f.get("role"),department:f.get("department"),departmentHead:f.has("departmentHead")})}} onClose={()=>setEdit(null)}/></>
+  <PersonModal config={edit&&{title:"Mitarbeiterkonto bearbeiten",body:<div className="person-form-grid">
+    <TextField name="displayName" label="Anzeigename" defaultValue={edit.display_name} required/>
+    <SelectField name="role" label="Rolle" defaultValue={edit.role} options={Object.keys(roleLabels)}/>
+    <SelectField name="department" label="Abteilung" defaultValue={edit.department} options={departments}/>
+    <label><input name="departmentHead" type="checkbox" defaultChecked={edit.department_head}/> Abteilungsleitung</label>
+    <label className="span-2">Öffentliche Mitarbeiterbiografie<textarea name="biographyText" rows="8" defaultValue={edit.biography_text||""}/></label>
+    <label className="span-2">Neues Profilbild<input name="profilePhotoFile" type="file" accept="image/png,image/jpeg,image/webp"/></label>
+    <label><input name="removeProfilePhoto" type="checkbox"/> Profilbild entfernen</label>
+  </div>,onSubmit:async f=>{
+    let profilePhoto;
+    const file=f.get("profilePhotoFile");
+    if(file&&file.size){
+      if(file.size>1500000)throw new Error("Profilbild darf höchstens 1,5 MB groß sein.");
+      profilePhoto=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||""));reader.onerror=()=>reject(new Error("Profilbild konnte nicht gelesen werden."));reader.readAsDataURL(file)});
+    }
+    return action({id:edit.id,action:"edit",displayName:f.get("displayName"),role:f.get("role"),department:f.get("department"),departmentHead:f.has("departmentHead"),biographyText:f.get("biographyText"),profilePhoto,removeProfilePhoto:f.has("removeProfilePhoto")});
+  }}} onClose={()=>setEdit(null)}/></>
 }
 
 
