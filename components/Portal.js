@@ -177,7 +177,7 @@ export default function Portal(){
 
       <div className="rcso-login-right">
         <div className="rcso-login-right-top">
-          <span>INTERNAL ACCESS</span>
+          <button className="rcso-login-top-arrow" type="button" aria-label="Interner Zugang">→</button>
           <span className="rcso-login-network-status">● RCSO-NET</span>
         </div>
 
@@ -192,7 +192,7 @@ export default function Portal(){
             <label>
               <span>Mitarbeiterkennung</span>
               <div className="rcso-login-input">
-                <span aria-hidden="true">◯</span>
+                <span className="rcso-field-icon rcso-field-icon-user" aria-hidden="true">ID</span>
                 <input name="employeeKey" placeholder="z. B. Walker 2041" autoComplete="username" required/>
               </div>
             </label>
@@ -200,7 +200,7 @@ export default function Portal(){
             <label>
               <span>Passwort</span>
               <div className="rcso-login-input">
-                <span aria-hidden="true">▣</span>
+                <span className="rcso-field-icon rcso-field-icon-lock" aria-hidden="true">PW</span>
                 <input
                   name="validationCode"
                   type={showLoginPassword?"text":"password"}
@@ -212,7 +212,7 @@ export default function Portal(){
                   type="button"
                   onClick={()=>setShowLoginPassword(value=>!value)}
                   aria-label={showLoginPassword?"Passwort verbergen":"Passwort anzeigen"}
-                >{showLoginPassword?"◉":"◎"}</button>
+                >{showLoginPassword?"HIDE":"SHOW"}</button>
               </div>
             </label>
 
