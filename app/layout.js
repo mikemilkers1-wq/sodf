@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Riverside County Sheriff's Office Terminal",
+  title: "Riverside County Sheriff's Office Records Terminal",
   description: "Internal law-enforcement records terminal",
   icons: {
     icon: [{ url: "/favicon.ico", sizes: "any" }, { url: "/rcso-logo.png", type: "image/png" }],

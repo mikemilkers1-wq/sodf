@@ -75,3 +75,449 @@ table{width:100%;border-collapse:collapse;color:var(--ink)}th,td{border:1px soli
 .person-create-button:hover {
   filter: brightness(1.04);
 }
+
+
+/* =====================================================================
+   RCSO v0.38 — standard Sheriff's Office login redesign
+   Scoped to .rcso-standard-login so the authenticated terminal is unchanged.
+   ===================================================================== */
+
+.rcso-standard-login {
+  min-height: 100vh;
+  height: auto;
+  padding: 38px 30px 76px;
+  overflow-y: auto;
+  position: relative;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(116deg, #2c1d17 0 43%, #d8c59c 43.2% 100%);
+  color: #fff;
+}
+
+.rcso-standard-login::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 48%, rgba(255,255,255,.09), transparent 32%),
+    radial-gradient(circle at 80% 38%, rgba(255,245,218,.22), transparent 31%),
+    linear-gradient(120deg, rgba(0,0,0,.30), transparent 36% 70%, rgba(255,255,255,.10));
+}
+
+.rcso-login-card {
+  position: relative;
+  z-index: 1;
+  width: min(1280px, 94vw);
+  min-height: min(760px, calc(100vh - 120px));
+  display: grid;
+  grid-template-columns: 54% 46%;
+  overflow: hidden;
+  border: 12px solid rgba(249,248,244,.96);
+  border-radius: 38px;
+  background: #f4f1e9;
+  box-shadow:
+    0 28px 70px rgba(44,28,17,.44),
+    inset 0 0 0 2px rgba(90,68,38,.15);
+}
+
+.rcso-login-left {
+  position: relative;
+  min-height: 720px;
+  overflow: hidden;
+  background:
+    linear-gradient(155deg, rgba(255,255,255,.96) 0 58%, rgba(226,216,193,.90) 100%);
+}
+
+.rcso-login-left::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.12), transparent 40%),
+    linear-gradient(0deg, rgba(55,39,25,.20), transparent 42%);
+}
+
+.rcso-login-brandline {
+  position: absolute;
+  z-index: 5;
+  left: 28px;
+  top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: #3b281c;
+}
+
+.rcso-login-brandline img {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+}
+
+.rcso-login-brandline div {
+  display: grid;
+  gap: 1px;
+}
+
+.rcso-login-brandline strong {
+  font-size: 16px;
+  letter-spacing: .02em;
+}
+
+.rcso-login-brandline span {
+  color: #b18a42;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rcso-login-main-badge {
+  position: absolute;
+  z-index: 2;
+  width: min(410px, 62%);
+  left: 50%;
+  top: 16%;
+  transform: translateX(-50%);
+  object-fit: contain;
+  filter: drop-shadow(0 10px 16px rgba(78,54,19,.16));
+  opacity: .96;
+}
+
+.rcso-login-scene {
+  position: absolute;
+  z-index: 3;
+  left: -1%;
+  bottom: -2%;
+  width: 102%;
+  height: auto;
+  object-fit: contain;
+  object-position: left bottom;
+}
+
+.rcso-login-left-caption {
+  position: absolute;
+  z-index: 6;
+  left: 34px;
+  bottom: 24px;
+  display: grid;
+  gap: 3px;
+  color: #f8f2e7;
+  text-shadow: 0 1px 3px #1d130d;
+}
+
+.rcso-login-left-caption strong {
+  font-size: 12px;
+  letter-spacing: .12em;
+}
+
+.rcso-login-left-caption span {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rcso-login-right {
+  position: relative;
+  min-height: 720px;
+  padding: 24px 46px 34px;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 50% 45%, #3b2c24 0, #2a1e19 62%, #1c1411 100%);
+  color: #f4ead9;
+}
+
+.rcso-login-right::before {
+  content: "";
+  position: absolute;
+  top: -6%;
+  left: -19%;
+  width: 34%;
+  height: 113%;
+  transform: skewX(-18deg);
+  background: #f5f2eb;
+  border-right: 1px solid rgba(180,140,69,.34);
+  box-shadow: 13px 0 38px rgba(0,0,0,.10);
+}
+
+.rcso-login-right-top {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #d4b169;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .10em;
+}
+
+.rcso-login-network-status {
+  color: #d8c18f;
+}
+
+.rcso-login-form-wrap {
+  position: relative;
+  z-index: 2;
+  width: min(500px, 100%);
+  margin: auto 0 auto auto;
+}
+
+.rcso-login-heading {
+  margin-bottom: 30px;
+}
+
+.rcso-login-heading > span {
+  color: #c6a763;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .15em;
+}
+
+.rcso-login-heading h1 {
+  margin: 7px 0 7px;
+  color: #f7f0e3;
+  font: 700 34px Arial, Helvetica, sans-serif;
+  letter-spacing: 0;
+  text-shadow: none;
+}
+
+.rcso-login-heading p {
+  margin: 0;
+  color: #ad9f95;
+  font-size: 13px;
+}
+
+.rcso-standard-login .rcso-login-panel {
+  width: 100%;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #f6ede0;
+}
+
+.rcso-standard-login .rcso-login-panel label {
+  display: grid;
+  gap: 8px;
+  color: #d5c9bd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rcso-login-input {
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  border: 1.5px solid #b7934e;
+  border-radius: 28px;
+  background: rgba(24,17,14,.18);
+  color: #d9b767;
+}
+
+.rcso-login-input:focus-within {
+  border-color: #efcf81;
+  box-shadow: 0 0 0 2px rgba(203,164,87,.15);
+}
+
+.rcso-standard-login .rcso-login-input input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f9f3e9;
+  font-size: 16px;
+  padding: 0;
+}
+
+.rcso-standard-login .rcso-login-input input::placeholder {
+  color: #81756f;
+}
+
+.rcso-password-toggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d3b365;
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.rcso-login-submit {
+  width: min(280px, 72%);
+  min-height: 58px;
+  margin: 16px auto 0;
+  border: 0;
+  border-radius: 30px;
+  background: linear-gradient(90deg, #d6b061, #efd58f, #d4aa55);
+  color: #332219;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0,0,0,.20);
+}
+
+.rcso-login-submit:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.rcso-login-submit:active {
+  transform: translateY(0);
+}
+
+.rcso-login-message {
+  min-height: 20px;
+  margin-top: -5px;
+  color: #f0a9a0;
+  text-align: center;
+  font-size: 12px;
+}
+
+.rcso-login-right-footer {
+  position: relative;
+  z-index: 2;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: auto;
+  color: #f0e9df;
+}
+
+.rcso-login-right-footer img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  opacity: .13;
+  filter: grayscale(.3);
+}
+
+.rcso-login-right-footer div {
+  display: grid;
+  gap: 4px;
+}
+
+.rcso-login-right-footer strong {
+  font-size: 20px;
+  line-height: 1.05;
+  max-width: 180px;
+}
+
+.rcso-login-right-footer span {
+  color: #bea66e;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rcso-login-legal {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, 88vw);
+  margin: 18px auto 0;
+  color: rgba(255,255,255,.72);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+@media (max-width: 1050px) {
+  .rcso-standard-login {
+    padding: 22px 18px 58px;
+  }
+
+  .rcso-login-card {
+    grid-template-columns: 46% 54%;
+    border-width: 9px;
+    border-radius: 28px;
+  }
+
+  .rcso-login-left,
+  .rcso-login-right {
+    min-height: 650px;
+  }
+
+  .rcso-login-main-badge {
+    width: 78%;
+  }
+
+  .rcso-login-right {
+    padding-left: 34px;
+    padding-right: 30px;
+  }
+
+  .rcso-login-right::before {
+    left: -23%;
+  }
+}
+
+@media (max-width: 760px) {
+  .rcso-standard-login {
+    display: block;
+    padding: 12px;
+    background: #2b1e18;
+  }
+
+  .rcso-login-card {
+    width: 100%;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    border-width: 6px;
+    border-radius: 20px;
+  }
+
+  .rcso-login-left {
+    min-height: 330px;
+  }
+
+  .rcso-login-brandline {
+    left: 18px;
+    top: 16px;
+  }
+
+  .rcso-login-main-badge {
+    top: 18%;
+    width: 220px;
+  }
+
+  .rcso-login-scene {
+    width: 100%;
+  }
+
+  .rcso-login-left-caption {
+    display: none;
+  }
+
+  .rcso-login-right {
+    min-height: 500px;
+    padding: 26px 22px 28px;
+  }
+
+  .rcso-login-right::before {
+    display: none;
+  }
+
+  .rcso-login-form-wrap {
+    margin: 54px auto 36px;
+  }
+
+  .rcso-login-right-footer {
+    align-self: center;
+  }
+
+  .rcso-login-legal {
+    width: 96%;
+    font-size: 9px;
+  }
+}

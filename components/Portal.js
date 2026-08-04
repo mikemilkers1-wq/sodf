@@ -96,6 +96,7 @@ export default function Portal(){
   const [selected,setSelected]=useState(null);
   const [message,setMessage]=useState("");
   const [search,setSearch]=useState("");
+  const [showLoginPassword,setShowLoginPassword]=useState(false);
 
   useEffect(()=>{bootstrap()},[]);
   useEffect(()=>{if(!employee)return;const t=setInterval(()=>refreshState(false),8000);return()=>clearInterval(t)},[employee,version]);
@@ -154,15 +155,87 @@ export default function Portal(){
     return result;
   },[search,state]);
 
-  if(!employee)return <main className="login-screen">
-    <img className="login-badge" src="/rcso-logo.png" alt="Riverside County Sheriff badge"/>
-    <h1>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</h1><p className="subtitle">LAW ENFORCEMENT RECORDS TERMINAL</p>
-    <form className="login-panel" onSubmit={login}>
-      <div className="panel-header">AUTORISIERTER ZUGANG</div>
-      <label>Mitarbeiterkennung<input name="employeeKey" placeholder="z. B. Walker 2041" required/></label>
-      <label>Validierungscode<input name="validationCode" type="password" required/></label>
-      <button type="submit">Zugang prüfen</button><div className="message">{message}</div>
-    </form>
+  if(!employee)return <main className="login-screen rcso-standard-login">
+    <section className="rcso-login-card" aria-label="Riverside County Sheriff's Office employee login">
+      <div className="rcso-login-left">
+        <div className="rcso-login-brandline">
+          <img src="/login/rcso-sheriff-badge.png" alt=""/>
+          <div>
+            <strong>RIVERSIDE COUNTY</strong>
+            <span>SHERIFF&apos;S OFFICE</span>
+          </div>
+        </div>
+
+        <img className="rcso-login-main-badge" src="/login/rcso-sheriff-badge.png" alt="Riverside County Sheriff badge"/>
+        <img className="rcso-login-scene" src="/login/rcso-login-scene.png" alt="Riverside County Special Response Team"/>
+
+        <div className="rcso-login-left-caption">
+          <strong>LAW ENFORCEMENT RECORDS TERMINAL</strong>
+          <span>Authorized county personnel only</span>
+        </div>
+      </div>
+
+      <div className="rcso-login-right">
+        <div className="rcso-login-right-top">
+          <span>INTERNAL ACCESS</span>
+          <span className="rcso-login-network-status">● RCSO-NET</span>
+        </div>
+
+        <div className="rcso-login-form-wrap">
+          <div className="rcso-login-heading">
+            <span>RIVERSIDE COUNTY SHERIFF&apos;S OFFICE</span>
+            <h1>Employee Terminal</h1>
+            <p>Enter your employee key and password to continue.</p>
+          </div>
+
+          <form className="login-panel rcso-login-panel" onSubmit={login}>
+            <label>
+              <span>Mitarbeiterkennung</span>
+              <div className="rcso-login-input">
+                <span aria-hidden="true">◯</span>
+                <input name="employeeKey" placeholder="z. B. Walker 2041" autoComplete="username" required/>
+              </div>
+            </label>
+
+            <label>
+              <span>Passwort</span>
+              <div className="rcso-login-input">
+                <span aria-hidden="true">▣</span>
+                <input
+                  name="validationCode"
+                  type={showLoginPassword?"text":"password"}
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  className="rcso-password-toggle"
+                  type="button"
+                  onClick={()=>setShowLoginPassword(value=>!value)}
+                  aria-label={showLoginPassword?"Passwort verbergen":"Passwort anzeigen"}
+                >{showLoginPassword?"◉":"◎"}</button>
+              </div>
+            </label>
+
+            <button className="rcso-login-submit" type="submit">ANMELDEN</button>
+            <div className="message rcso-login-message" role="alert" aria-live="polite">{message}</div>
+          </form>
+        </div>
+
+        <div className="rcso-login-right-footer">
+          <img src="/login/rcso-srt-seal.png" alt=""/>
+          <div>
+            <strong>TO PROTECT AND SERVE</strong>
+            <span>Riverside County · California</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p className="rcso-login-legal">
+      Dieses System ist ausschließlich für autorisierte dienstliche Nutzung bestimmt. Aktivitäten können überwacht,
+      protokolliert und behördenintern ausgewertet werden. Unbefugter Zugriff oder die Weitergabe geschützter
+      Informationen kann disziplinarische, zivilrechtliche oder strafrechtliche Folgen haben.
+    </p>
   </main>;
 
   const tabs=[["home","⌂","Homepage"],["people","◉","Personregister"],["employees","▦","Mitarbeiterliste"],["bolos","⚑","BOLOs"],["files","▤","Akten"],["arrests","▣","Festnahmen"],["complaints","▧","Strafanzeigen"],["admin","⚙","Admin-Menü"]];
